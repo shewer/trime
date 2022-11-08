@@ -21,13 +21,13 @@
 	url = https://github.com/osfans/miniglog.git
 [submodule "app/src/main/jni/librime"]
 	path = app/src/main/jni/librime
-	url = https://github.com/rime/librime.git
+	url = https://github.com/shewer/librime.git
 [submodule "app/src/main/jni/libiconv"]
 	path = app/src/main/jni/libiconv
 	url = https://github.com/osfans/libiconv-gnu.git
 [submodule "app/src/main/jni/librime-lua"]
 	path = app/src/main/jni/librime-lua
-	url = https://github.com/hchunhui/librime-lua
+	url = https://github.com/shewer/librime-lua
 [submodule "app/src/main/jni/librime-lua-deps"]
 	path = app/src/main/jni/librime-lua-deps
 	url = https://github.com/hchunhui/librime-lua
