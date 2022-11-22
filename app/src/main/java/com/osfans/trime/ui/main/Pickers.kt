@@ -6,8 +6,8 @@ import androidx.appcompat.app.AlertDialog
 import com.osfans.trime.R
 import com.osfans.trime.core.Rime
 import com.osfans.trime.data.AppPrefs
-import com.osfans.trime.data.Config
 import com.osfans.trime.data.sound.SoundManager
+import com.osfans.trime.data.theme.Config
 import com.osfans.trime.data.theme.ThemeManager
 import com.osfans.trime.ime.core.Trime
 import com.osfans.trime.ui.components.CoroutineChoiceDialog
@@ -47,13 +47,15 @@ suspend fun Context.colorPicker(
         onInit {
             val all = Config.get().presetColorSchemes
             items = all.map { it.second }.toTypedArray()
-            val current = prefs.looks.selectedColor
-            val source = all.map { it.first }.toTypedArray()
-            checkedItem = source.indexOf(current)
+            val current = prefs.themeAndColor.selectedColor
+            val schemeIds = all.map { it.first }
+            checkedItem = schemeIds.indexOf(current)
         }
         postiveDispatcher = Dispatchers.Default
         onOKButton {
-            prefs.looks.selectedColor = items[checkedItem].toString()
+            val all = Config.get().presetColorSchemes
+            val schemeIds = all.map { it.first }
+            prefs.themeAndColor.selectedColor = schemeIds[checkedItem]
             Trime.getServiceOrNull()?.initKeyboard() // 立刻重初始化键盘生效
         }
     }.create()

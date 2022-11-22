@@ -2,7 +2,7 @@ package com.osfans.trime.ime.keyboard
 
 import android.content.res.Configuration
 import com.osfans.trime.data.AppPrefs
-import com.osfans.trime.data.Config
+import com.osfans.trime.data.theme.Config
 import com.osfans.trime.ime.core.Trime
 import com.osfans.trime.util.appContext
 import timber.log.Timber
@@ -91,7 +91,7 @@ class KeyboardSwitcher {
         }
 
         if (i == 0 && keyboardNames.contains("mini")) {
-            if (AppPrefs.defaultInstance().looks.useMiniKeyboard) {
+            if (AppPrefs.defaultInstance().themeAndColor.useMiniKeyboard) {
                 val realkeyboard = appContext.getResources().getConfiguration().keyboard
                 if (realkeyboard != Configuration.KEYBOARD_NOKEYS) {
                     Timber.i("onStartInputView() configuration.keyboard=" + realkeyboard + ", keyboardType=" + i)

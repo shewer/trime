@@ -1,3 +1,6 @@
+#include <jni.h>
+#include <string>
+#include <rime_api.h>
 #include "rime_jni.h"
 #include "levers.h"
 
@@ -21,6 +24,7 @@ JNI_OnLoad(JavaVM* jvm, void* reserved)
 
 static jobject rimeConfigValueToJObject(JNIEnv *env, RimeConfig* config, const char* key);
 static RimeSessionId activated_session_id = 0;
+static bool firstRun = true;
 
 extern "C"
 JNIEXPORT void JNICALL
@@ -42,7 +46,8 @@ void init_traits(JNIEnv *env, jstring shared_data_dir, jstring user_data_dir, vo
     const char* p_user_data_dir = user_data_dir == nullptr ? nullptr : env->GetStringUTFChars(user_data_dir, nullptr);
     traits.shared_data_dir = p_shared_data_dir;
     traits.user_data_dir = p_user_data_dir;
-    traits.app_name = "com.osfans.trime";
+    traits.log_dir = (std::string(p_user_data_dir) + "/log").c_str();
+    traits.app_name = "rime.trime";
     func(&traits);
     env->ReleaseStringUTFChars(shared_data_dir, p_shared_data_dir);
     env->ReleaseStringUTFChars(user_data_dir, p_user_data_dir);
@@ -51,7 +56,10 @@ void init_traits(JNIEnv *env, jstring shared_data_dir, jstring user_data_dir, vo
 extern "C"
 JNIEXPORT void JNICALL
 Java_com_osfans_trime_core_Rime_setup(JNIEnv *env, jclass clazz, jstring shared_data_dir, jstring user_data_dir) {
-    init_traits(env, shared_data_dir, user_data_dir, RimeSetup);
+    if (firstRun) {
+        init_traits(env, shared_data_dir, user_data_dir, RimeSetup);
+        firstRun = false;
+    }
 }
 
 // entry and exit

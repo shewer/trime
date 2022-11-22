@@ -16,7 +16,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package com.osfans.trime.data;
+package com.osfans.trime.data.theme;
 
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -32,6 +32,8 @@ import android.util.TypedValue;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.osfans.trime.core.Rime;
+import com.osfans.trime.data.AppPrefs;
+import com.osfans.trime.data.DataManager;
 import com.osfans.trime.ime.enums.PositionType;
 import com.osfans.trime.ime.enums.SymbolKeyboardType;
 import com.osfans.trime.ime.keyboard.Key;
@@ -50,17 +52,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Pattern;
 import kotlin.Pair;
 import kotlin.collections.MapsKt;
 import timber.log.Timber;
 
 /** 解析 YAML 配置文件 */
 public class Config {
-  // 默认的用户数据路径
-  private static final String RIME = "rime";
-  // private static final String TAG = "Config";
-
   private static Config self = null;
 
   private static final AppPrefs appPrefs = AppPrefs.defaultInstance();
@@ -73,19 +70,15 @@ public class Config {
     return self;
   }
 
-  private Map<?, ?> mStyle, mDefaultStyle;
-  private String themeName, soundPackageName, currentSound;
-  private static final String defaultName = "trime";
-  private String schema_id, colorID;
+  private Map<String, ?> defaultKeyboardStyle;
+  private String currentThemeName, soundPackageName, currentSound;
+  private static final String defaultThemeName = "trime";
+  private String currentSchemaId, currentColorSchemeId;
 
-  private Map<?, ?> fallbackColors;
+  private Map<String, String> fallbackColors;
   private Map<String, Map<String, String>> presetColorSchemes;
   private Map<String, Map<String, ?>> presetKeyboards;
   private Map<String, ?> liquidKeyboard;
-
-  private static final Pattern pattern = Pattern.compile("\\s*\n\\s*");
-
-  private String[] clipBoardCompare, clipBoardOutput, draftOutput;
 
   public Config() {
     this(false);
@@ -96,7 +89,7 @@ public class Config {
         "\t<TrimeInit>\t" + Thread.currentThread().getStackTrace()[2].getMethodName() + "\t";
     Timber.d(methodName);
     self = this;
-    themeName = appPrefs.getLooks().getSelectedTheme();
+    currentThemeName = appPrefs.getThemeAndColor().getSelectedTheme();
     soundPackageName = appPrefs.getKeyboard().getSoundPackage();
 
     Timber.d(methodName + "sync");
@@ -113,37 +106,11 @@ public class Config {
     Timber.d(methodName + "setSoundFromColor");
     setSoundFromColor();
 
-    Timber.d(methodName + "setClipboard&draft");
-    clipBoardCompare = appPrefs.getOther().getClipboardCompareRules().trim().split("\n");
-    clipBoardOutput = appPrefs.getOther().getClipboardOutputRules().trim().split("\n");
-    draftOutput = appPrefs.getOther().getDraftOutputRules().trim().split("\n");
-
     Timber.d(methodName + "finish");
   }
 
-  public void setClipBoardCompare(String str) {
-    String s = pattern.matcher(str).replaceAll("\n").trim();
-    clipBoardCompare = s.split("\n");
-
-    appPrefs.getOther().setClipboardCompareRules(s);
-  }
-
-  public void setClipBoardOutput(String str) {
-    String s = pattern.matcher(str).replaceAll("\n").trim();
-    clipBoardOutput = s.split("\n");
-
-    appPrefs.getOther().setClipboardOutputRules(s);
-  }
-
-  public void setDraftOutput(String str) {
-    String s = pattern.matcher(str).replaceAll("\n").trim();
-    draftOutput = s.split("\n");
-
-    appPrefs.getOther().setDraftOutputRules(s);
-  }
-
   public String getTheme() {
-    return themeName;
+    return currentThemeName;
   }
 
   public String getSoundPackage() {
@@ -165,8 +132,8 @@ public class Config {
   }
 
   public void setTheme(String theme) {
-    themeName = theme;
-    appPrefs.getLooks().setSelectedTheme(themeName);
+    currentThemeName = theme;
+    appPrefs.getThemeAndColor().setSelectedTheme(currentThemeName);
     init(false);
   }
 
@@ -207,7 +174,7 @@ public class Config {
 
   // 配色指定音效时自动切换音效效果（不会自动修改设置）。
   public void setSoundFromColor() {
-    final Map<String, ?> m = (Map<String, ?>) presetColorSchemes.get(colorID);
+    final Map<String, ?> m = (Map<String, ?>) presetColorSchemes.get(currentColorSchemeId);
     assert m != null;
     if (m.containsKey("sound")) {
       String sound = (String) m.get("sound");
@@ -227,30 +194,29 @@ public class Config {
     }
   }
 
-  private void init(boolean skip_delopy) {
-    Timber.d("init() themeName=%s schema_id=%s", themeName, schema_id);
+  public void init(boolean skipDeployment) {
+    Timber.d("Initializing theme ..., skip deployment: %s", skipDeployment);
+    Timber.d("Current theme: %s, current schema id: %s", currentThemeName, currentSchemaId);
     try {
-      String file_name = themeName + ".yaml";
-      if (skip_delopy) {
-        File f = new File(Rime.get_user_data_dir() + File.separator + "build", file_name);
-        if (f.exists()) {
-          Timber.d("init() deploy_config_file skip");
-        } else {
-          Rime.deploy_config_file(file_name, "config_version");
-        }
+      final String fullThemeFileName = currentThemeName + ".yaml";
+      final File themeFile = new File(Rime.get_user_data_dir(), "build/" + fullThemeFileName);
+      if (skipDeployment && themeFile.exists()) {
+        Timber.d("Skipped theme file deployment");
       } else {
-        Rime.deploy_config_file(file_name, "config_version");
+        Timber.d("The theme has not been deployed yet, deploying ...");
+        Rime.deploy_config_file(fullThemeFileName, "config_version");
       }
-      Timber.d("init() deploy_config_file done");
 
-      Map<String, Map<String, ?>> globalThemeConfig = Rime.config_get_map(themeName, "");
-      if (globalThemeConfig == null) {
-        themeName = defaultName;
-        globalThemeConfig = Rime.config_get_map(themeName, "");
-      }
-      Timber.d("init() load_map done");
-      mDefaultStyle = (Map<?, ?>) globalThemeConfig.get("style");
-      fallbackColors = (Map<?, ?>) globalThemeConfig.get("fallback_colors");
+      Timber.d("Fetching global theme config map ...");
+      final Map<String, Map<String, ?>> globalThemeConfig =
+          Rime.config_get_map(currentThemeName, "") != null
+              ? Rime.config_get_map(currentThemeName, "")
+              : Rime.config_get_map(defaultThemeName, "config_version");
+      Objects.requireNonNull(globalThemeConfig, "The theme file cannot be empty!");
+      Timber.d("Fetching done");
+
+      defaultKeyboardStyle = (Map<String, Map<String, ?>>) globalThemeConfig.get("style");
+      fallbackColors = (Map<String, String>) globalThemeConfig.get("fallback_colors");
       Key.presetKeys = (Map<String, Map<String, String>>) globalThemeConfig.get("preset_keys");
       presetColorSchemes =
           (Map<String, Map<String, String>>) globalThemeConfig.get("preset_color_schemes");
@@ -258,34 +224,26 @@ public class Config {
       liquidKeyboard = globalThemeConfig.get("liquid_keyboard");
       initLiquidKeyboard();
       Timber.d("init() initLiquidKeyboard done");
-      Rime.setShowSwitches(appPrefs.getKeyboard().getSwitchesEnabled());
-      Rime.setShowSwitchArrow(appPrefs.getKeyboard().getSwitchArrowEnabled());
-      reset();
+      reloadSchemaId();
       Timber.d("init() reset done");
       initCurrentColors();
       initEnterLabels();
-      Timber.d("init() finins");
+      Timber.i("The theme is initialized");
     } catch (Exception e) {
-      e.printStackTrace();
-      if (!themeName.equals(defaultName)) setTheme(defaultName);
+      Timber.e(e, "Failed to parse the theme!");
+      if (!currentThemeName.equals(defaultThemeName)) setTheme(defaultThemeName);
     }
   }
 
-  public void reset() {
-    Timber.d("reset()");
-    schema_id = Rime.getSchemaId();
-    if (schema_id != null) mStyle = (Map<?, ?>) Rime.schema_get_value(schema_id, "style");
+  public void reloadSchemaId() {
+    currentSchemaId = Rime.getSchemaId();
   }
 
   @Nullable
   private Object _getValue(String k1, String k2) {
     Map<?, ?> m;
-    if (mStyle != null && mStyle.containsKey(k1)) {
-      m = (Map<?, ?>) mStyle.get(k1);
-      if (m != null && m.containsKey(k2)) return m.get(k2);
-    }
-    if (mDefaultStyle != null && mDefaultStyle.containsKey(k1)) {
-      m = (Map<?, ?>) mDefaultStyle.get(k1);
+    if (defaultKeyboardStyle != null && defaultKeyboardStyle.containsKey(k1)) {
+      m = (Map<?, ?>) defaultKeyboardStyle.get(k1);
       if (m != null && m.containsKey(k2)) return m.get(k2);
     }
     return null;
@@ -293,12 +251,8 @@ public class Config {
 
   private Object _getValue(String k1, String k2, Object defaultValue) {
     Map<?, ?> m;
-    if (mStyle != null && mStyle.containsKey(k1)) {
-      m = (Map<?, ?>) mStyle.get(k1);
-      if (m != null && m.containsKey(k2)) return m.get(k2);
-    }
-    if (mDefaultStyle != null && mDefaultStyle.containsKey(k1)) {
-      m = (Map<?, ?>) mDefaultStyle.get(k1);
+    if (defaultKeyboardStyle != null && defaultKeyboardStyle.containsKey(k1)) {
+      m = (Map<?, ?>) defaultKeyboardStyle.get(k1);
       if (m != null && m.containsKey(k2)) return m.get(k2);
     }
     return defaultValue;
@@ -306,14 +260,14 @@ public class Config {
 
   @Nullable
   private Object _getValue(String k1) {
-    if (mStyle != null && mStyle.containsKey(k1)) return mStyle.get(k1);
-    if (mDefaultStyle != null && mDefaultStyle.containsKey(k1)) return mDefaultStyle.get(k1);
+    if (defaultKeyboardStyle != null && defaultKeyboardStyle.containsKey(k1))
+      return defaultKeyboardStyle.get(k1);
     return null;
   }
 
   private Object _getValue(String k1, Object defaultValue) {
-    if (mStyle != null && mStyle.containsKey(k1)) return mStyle.get(k1);
-    if (mDefaultStyle != null && mDefaultStyle.containsKey(k1)) return mDefaultStyle.get(k1);
+    if (defaultKeyboardStyle != null && defaultKeyboardStyle.containsKey(k1))
+      return defaultKeyboardStyle.get(k1);
     return defaultValue;
   }
 
@@ -337,11 +291,11 @@ public class Config {
 
   private String getKeyboardName(@NonNull String name) {
     if (name.contentEquals(".default")) {
-      if (presetKeyboards.containsKey(schema_id)) name = schema_id; // 匹配方案名
+      if (presetKeyboards.containsKey(currentSchemaId)) name = currentSchemaId; // 匹配方案名
       else {
-        if (schema_id.contains("_")) name = schema_id.split("_")[0];
+        if (currentSchemaId.contains("_")) name = currentSchemaId.split("_")[0];
         if (!presetKeyboards.containsKey(name)) { // 匹配“_”前的方案名
-          Object o = Rime.schema_get_value(schema_id, "speller/alphabet");
+          Object o = Rime.schema_get_value(currentSchemaId, "speller/alphabet");
           name = "qwerty"; // 26
           if (o != null) {
             final String alphabet = o.toString();
@@ -376,7 +330,7 @@ public class Config {
   public void initLiquidKeyboard() {
     TabManager.clear();
     if (liquidKeyboard == null) return;
-    Timber.d("initLiquidKeyboard()");
+    Timber.d("Initializing LiquidKeyboard ...");
     final List<?> names = (List<?>) liquidKeyboard.get("keyboards");
     if (names == null) return;
     for (Object s : names) {
@@ -409,8 +363,7 @@ public class Config {
   }
 
   public void destroy() {
-    if (mDefaultStyle != null) mDefaultStyle.clear();
-    if (mStyle != null) mStyle.clear();
+    if (defaultKeyboardStyle != null) defaultKeyboardStyle.clear();
     self = null;
   }
 
@@ -518,7 +471,9 @@ public class Config {
     }
     o = getColorObject(key);
     if (o == null) {
-      o = ((Map<?, ?>) Objects.requireNonNull(presetColorSchemes.get(colorID))).get(key);
+      o =
+          ((Map<?, ?>) Objects.requireNonNull(presetColorSchemes.get(currentColorSchemeId)))
+              .get(key);
     }
     return parseColor(o);
   }
@@ -597,9 +552,9 @@ public class Config {
   //  获取当前配色方案的key的value，或者从fallback获取值。
   @Nullable
   private Object getColorObject(String key) {
-    final Map<?, ?> map = (Map<?, ?>) presetColorSchemes.get(colorID);
+    final Map<?, ?> map = (Map<?, ?>) presetColorSchemes.get(currentColorSchemeId);
     if (map == null) return null;
-    appPrefs.getLooks().setSelectedColor(colorID);
+    appPrefs.getThemeAndColor().setSelectedColor(currentColorSchemeId);
     Object o = map.get(key);
     String fallbackKey = key;
     while (o == null && fallbackColors.containsKey(fallbackKey)) {
@@ -617,7 +572,7 @@ public class Config {
    * @return java.lang.String 首个已配置的主题方案名
    */
   private String getColorSchemeName() {
-    String scheme = appPrefs.getLooks().getSelectedColor();
+    String scheme = appPrefs.getThemeAndColor().getSelectedColor();
     if (!presetColorSchemes.containsKey(scheme)) scheme = getString("color_scheme"); // 主題中指定的配色
     if (!presetColorSchemes.containsKey(scheme)) scheme = "default"; // 主題中的default配色
     Map<String, ?> color = (Map<String, ?>) presetColorSchemes.get(scheme);
@@ -638,7 +593,7 @@ public class Config {
    * @return 配色方案名称
    */
   private String getColorSchemeName(boolean darkMode) {
-    String scheme = appPrefs.getLooks().getSelectedColor();
+    String scheme = appPrefs.getThemeAndColor().getSelectedColor();
     if (!presetColorSchemes.containsKey(scheme)) scheme = getString("color_scheme"); // 主題中指定的配色
     if (!presetColorSchemes.containsKey(scheme)) scheme = "default"; // 主題中的default配色
     Map<String, ?> color = (Map<String, ?>) presetColorSchemes.get(scheme);
@@ -796,26 +751,6 @@ public class Config {
     return PositionType.Companion.fromString(getString("layout/position"));
   }
 
-  public int getLongTimeout() {
-    int progress = appPrefs.getKeyboard().getLongPressTimeout();
-    if (progress > 60) progress = 60;
-    return progress * 10 + 100;
-  }
-
-  public int getRepeatInterval() {
-    int progress = appPrefs.getKeyboard().getRepeatInterval();
-    if (progress > 9) progress = 9;
-    return progress * 10 + 10;
-  }
-
-  public static int getDeleteCandidateTimeout() {
-    return appPrefs.getKeyboard().getDeleteCandidateTimeout();
-  }
-
-  public static boolean getShouldLongClickDeleteCandidate() {
-    return appPrefs.getKeyboard().getShouldLongClickDeleteCandidate();
-  }
-
   public int getLiquidPixel(String key) {
     if (liquidKeyboard != null) {
       if (liquidKeyboard.containsKey(key)) {
@@ -932,16 +867,18 @@ public class Config {
   // 初始化当前配色 Config 2.0
   public void initCurrentColors() {
     curcentColors.clear();
-    colorID = getColorSchemeName();
+    currentColorSchemeId = getColorSchemeName();
     backgroundFolder = getString("background_folder");
+    Timber.d("Initializing currentColors ...");
     Timber.d(
-        "initCurrentColors() colorID=%s themeName=%s schema_id=%s", colorID, themeName, schema_id);
-    final Map<?, ?> map = (Map<?, ?>) presetColorSchemes.get(colorID);
+        "currentColorSchemeId = %s, currentThemeName = %s, currentSchemaId = %s",
+        currentColorSchemeId, currentThemeName, currentSchemaId);
+    final Map<?, ?> map = (Map<?, ?>) presetColorSchemes.get(currentColorSchemeId);
     if (map == null) {
-      Timber.i("no colorID %s", colorID);
+      Timber.i("Color scheme id not found: %s", currentColorSchemeId);
       return;
     }
-    appPrefs.getLooks().setSelectedColor(colorID);
+    appPrefs.getThemeAndColor().setSelectedColor(currentColorSchemeId);
 
     for (Map.Entry<?, ?> entry : map.entrySet()) {
       Object value = getColorRealValue(entry.getValue());
@@ -977,17 +914,18 @@ public class Config {
   // 当切换暗黑模式时，刷新键盘配色方案
   public void initCurrentColors(boolean darkMode) {
     curcentColors.clear();
-    colorID = getColorSchemeName(darkMode);
+    currentColorSchemeId = getColorSchemeName(darkMode);
     backgroundFolder = getString("background_folder");
+    Timber.d("Initializing currentColors ...");
     Timber.d(
-        "initCurrentColors() colorID=%s themeName=%s schema_id=%s darkMode=%s",
-        colorID, themeName, schema_id, darkMode);
-    final Map<?, ?> map = (Map<?, ?>) presetColorSchemes.get(colorID);
+        "currentColorSchemeId = %s, currentThemeName = %s, currentSchemaId = %s, isDarkMode = %s",
+        currentColorSchemeId, currentThemeName, currentSchemaId, darkMode);
+    final Map<?, ?> map = (Map<?, ?>) presetColorSchemes.get(currentColorSchemeId);
     if (map == null) {
-      Timber.i("no colorID %s", colorID);
+      Timber.i("Color scheme id not found: %s", currentColorSchemeId);
       return;
     }
-    appPrefs.getLooks().setSelectedColor(colorID);
+    appPrefs.getThemeAndColor().setSelectedColor(currentColorSchemeId);
 
     for (Map.Entry<?, ?> entry : map.entrySet()) {
       Object value = getColorRealValue(entry.getValue());

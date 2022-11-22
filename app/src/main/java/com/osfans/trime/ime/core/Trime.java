@@ -61,8 +61,8 @@ import com.osfans.trime.BuildConfig;
 import com.osfans.trime.R;
 import com.osfans.trime.core.Rime;
 import com.osfans.trime.data.AppPrefs;
-import com.osfans.trime.data.Config;
 import com.osfans.trime.data.db.draft.DraftHelper;
+import com.osfans.trime.data.theme.Config;
 import com.osfans.trime.databinding.CompositionRootBinding;
 import com.osfans.trime.databinding.InputRootBinding;
 import com.osfans.trime.ime.broadcast.IntentReceiver;
@@ -102,7 +102,7 @@ public class Trime extends LifecycleInputMethodService {
 
   @NonNull
   private AppPrefs getPrefs() {
-    return AppPrefs.Companion.defaultInstance();
+    return AppPrefs.defaultInstance();
   }
 
   /** 输入法配置 */
@@ -572,7 +572,7 @@ public class Trime extends LifecycleInputMethodService {
     if (inputRootBinding == null) return;
     inputRootBinding.symbol.symbolInput.setVisibility(View.GONE);
     inputRootBinding.main.mainInput.setVisibility(View.VISIBLE);
-    getImeConfig().reset();
+    getImeConfig().reloadSchemaId();
     loadConfig();
     getImeConfig().initCurrentColors();
     getImeConfig().setSoundFromColor();
@@ -594,7 +594,7 @@ public class Trime extends LifecycleInputMethodService {
 
   public void initKeyboardDarkMode(boolean darkMode) {
     if (getImeConfig().hasDarkLight()) {
-      getImeConfig().reset();
+      getImeConfig().reloadSchemaId();
       loadConfig();
       getImeConfig().initCurrentColors(darkMode);
       getImeConfig().setSoundFromColor();
@@ -763,7 +763,7 @@ public class Trime extends LifecycleInputMethodService {
   @Override
   public void onStartInputView(EditorInfo attribute, boolean restarting) {
     super.onStartInputView(attribute, restarting);
-    if (getPrefs().getLooks().getAutoDark()) {
+    if (getPrefs().getThemeAndColor().getAutoDark()) {
       int nightModeFlags =
           getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
       if (setDarkMode(nightModeFlags == Configuration.UI_MODE_NIGHT_YES)) {
