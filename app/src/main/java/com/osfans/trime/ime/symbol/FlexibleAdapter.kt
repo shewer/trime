@@ -13,6 +13,7 @@ import com.osfans.trime.R
 import com.osfans.trime.data.db.CollectionHelper
 import com.osfans.trime.data.db.DatabaseBean
 import com.osfans.trime.data.theme.Config
+import com.osfans.trime.data.theme.FontManager
 import com.osfans.trime.databinding.SimpleKeyItemBinding
 import kotlinx.coroutines.launch
 
@@ -62,14 +63,14 @@ class FlexibleAdapter(
             val bean = mBeans[position]
             simpleKeyText.apply {
                 text = bean.text
-                typeface = theme.getFont("long_text_font")
-                when (val textColor = theme.getLiquidColor("long_text_color")) {
-                    null -> setTextColor(theme.getLiquidColor("key_text_color"))
+                typeface = FontManager.getTypeface(theme.style.getString("long_text_font"))
+                when (val textColor = theme.colors.getColor("long_text_color")) {
+                    null -> setTextColor(theme.colors.getColor("key_text_color"))
                     else -> setTextColor(textColor)
                 }
 
-                val longTextSize = theme.getFloat("key_long_text_size")
-                val labelTextSize = theme.getFloat("label_text_size")
+                val longTextSize = theme.style.getFloat("key_long_text_size")
+                val labelTextSize = theme.style.getFloat("label_text_size")
                 textSize = when {
                     longTextSize > 0 -> longTextSize
                     labelTextSize > 0 -> labelTextSize
@@ -79,7 +80,7 @@ class FlexibleAdapter(
             simpleKeyPin.visibility = if (bean.pinned) View.VISIBLE else View.INVISIBLE
 
             // if (background != null) viewHolder.itemView.setBackground(background);
-            (itemView as CardView).background = theme.getDrawable(
+            (itemView as CardView).background = theme.colors.getDrawable(
                 "long_text_back_color",
                 "key_border",
                 "key_long_text_border",

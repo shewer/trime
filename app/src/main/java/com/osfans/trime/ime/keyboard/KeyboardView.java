@@ -46,10 +46,13 @@ import androidx.annotation.NonNull;
 import com.osfans.trime.R;
 import com.osfans.trime.data.AppPrefs;
 import com.osfans.trime.data.theme.Config;
+import com.osfans.trime.data.theme.FontManager;
 import com.osfans.trime.databinding.KeyboardKeyPreviewBinding;
 import com.osfans.trime.ime.enums.KeyEventType;
 import com.osfans.trime.ime.lifecycle.CoroutineScopeJava;
+import com.osfans.trime.util.DimensionsKt;
 import com.osfans.trime.util.LeakGuardHandlerWrapper;
+import com.osfans.trime.util.SystemServicesKt;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -242,6 +245,27 @@ public class KeyboardView extends View implements View.OnClickListener, Coroutin
     labelEnter = mEnterLabels.get("default");
   }
 
+  private void handleEnterLabel(@NonNull Config theme) {
+    if ((mEnterLabels = (Map<String, String>) theme.style.getObject("enter_labels")) == null) {
+      mEnterLabels = new HashMap<>();
+    }
+
+    final String defaultEnterLabel;
+    if (mEnterLabels.containsKey("default")) {
+      defaultEnterLabel = mEnterLabels.get("default");
+    } else {
+      defaultEnterLabel = "Enter";
+      mEnterLabels.put("default", defaultEnterLabel);
+    }
+
+    for (final String label :
+        new String[] {"done", "go", "next", "none", "pre", "search", "send"}) {
+      if (!mEnterLabels.containsKey(label)) {
+        mEnterLabels.put(label, defaultEnterLabel);
+      }
+    }
+  }
+
   public void setEnterLabel(int action, CharSequence actionLabel) {
     // enter_label_mode 取值：
     // 0不使用，1只使用actionlabel，2优先使用，3当其他方式没有获得label时才读取actionlabel
@@ -338,67 +362,68 @@ public class KeyboardView extends View implements View.OnClickListener, Coroutin
 
   public void reset() {
     final Config config = Config.get();
-    key_symbol_color = config.getColor("key_symbol_color");
-    hilited_key_symbol_color = config.getColor("hilited_key_symbol_color");
-    mShadowColor = config.getColor("shadow_color");
+    key_symbol_color = config.colors.getColor("key_symbol_color");
+    hilited_key_symbol_color = config.colors.getColor("hilited_key_symbol_color");
+    mShadowColor = config.colors.getColor("shadow_color");
 
-    mSymbolSize = config.getPixel("symbol_text_size", 10);
-    mKeyTextSize = config.getPixel("key_text_size", 22);
-    mVerticalCorrection = config.getPixel("vertical_correction");
-    setProximityCorrectionEnabled(config.getBoolean("proximity_correction"));
-    mPreviewOffset = config.getPixel("preview_offset");
-    mPreviewHeight = config.getPixel("preview_height");
-    mLabelTextSize = config.getPixel("key_long_text_size");
+    mSymbolSize = (int) DimensionsKt.sp2px(config.style.getFloat("symbol_text_size"));
+    mKeyTextSize = (int) DimensionsKt.sp2px(config.style.getFloat("key_text_size"));
+    mVerticalCorrection = (int) DimensionsKt.dp2px(config.style.getFloat("vertical_correction"));
+    setProximityCorrectionEnabled(config.style.getBoolean("proximity_correction"));
+    mPreviewOffset = (int) DimensionsKt.dp2px(config.style.getFloat("preview_offset"));
+    mPreviewHeight = (int) DimensionsKt.dp2px(config.style.getFloat("preview_height"));
+    mLabelTextSize = (int) DimensionsKt.sp2px(config.style.getFloat("key_long_text_size"));
     if (mLabelTextSize == 0) mLabelTextSize = mKeyTextSize;
 
-    mBackgroundDimAmount = config.getFloat("background_dim_amount");
-    mShadowRadius = config.getFloat("shadow_radius");
-    final float mRoundCorner = config.getFloat("round_corner");
+    mBackgroundDimAmount = config.style.getFloat("background_dim_amount");
+    mShadowRadius = config.style.getFloat("shadow_radius");
+    final float mRoundCorner = config.style.getFloat("round_corner");
 
     mKeyBackColor = new StateListDrawable();
     mKeyBackColor.addState(
-        Key.KEY_STATE_PRESSED_ON, config.getColorDrawable("hilited_on_key_back_color"));
+        Key.KEY_STATE_PRESSED_ON, config.colors.getDrawable("hilited_on_key_back_color"));
     mKeyBackColor.addState(
-        Key.KEY_STATE_PRESSED_OFF, config.getColorDrawable("hilited_off_key_back_color"));
-    mKeyBackColor.addState(Key.KEY_STATE_NORMAL_ON, config.getColorDrawable("on_key_back_color"));
-    mKeyBackColor.addState(Key.KEY_STATE_NORMAL_OFF, config.getColorDrawable("off_key_back_color"));
+        Key.KEY_STATE_PRESSED_OFF, config.colors.getDrawable("hilited_off_key_back_color"));
+    mKeyBackColor.addState(Key.KEY_STATE_NORMAL_ON, config.colors.getDrawable("on_key_back_color"));
     mKeyBackColor.addState(
-        Key.KEY_STATE_PRESSED, config.getColorDrawable("hilited_key_back_color"));
-    mKeyBackColor.addState(Key.KEY_STATE_NORMAL, config.getColorDrawable("key_back_color"));
+        Key.KEY_STATE_NORMAL_OFF, config.colors.getDrawable("off_key_back_color"));
+    mKeyBackColor.addState(
+        Key.KEY_STATE_PRESSED, config.colors.getDrawable("hilited_key_back_color"));
+    mKeyBackColor.addState(Key.KEY_STATE_NORMAL, config.colors.getDrawable("key_back_color"));
 
     mKeyTextColor =
         new ColorStateList(
             Key.KEY_STATES,
             new int[] {
-              config.getColor("hilited_on_key_text_color"),
-              config.getColor("hilited_off_key_text_color"),
-              config.getColor("on_key_text_color"),
-              config.getColor("off_key_text_color"),
-              config.getColor("hilited_key_text_color"),
-              config.getColor("key_text_color")
+              config.colors.getColor("hilited_on_key_text_color"),
+              config.colors.getColor("hilited_off_key_text_color"),
+              config.colors.getColor("on_key_text_color"),
+              config.colors.getColor("off_key_text_color"),
+              config.colors.getColor("hilited_key_text_color"),
+              config.colors.getColor("key_text_color")
             });
 
-    final Integer color = config.getColor("preview_text_color");
+    final Integer color = config.colors.getColor("preview_text_color");
     if (color != null) mPreviewText.setTextColor(color);
-    final Integer previewBackColor = config.getColor("preview_back_color");
+    final Integer previewBackColor = config.colors.getColor("preview_back_color");
     if (previewBackColor != null) {
       final GradientDrawable background = new GradientDrawable();
       background.setColor(previewBackColor);
       background.setCornerRadius(mRoundCorner);
       mPreviewText.setBackground(background);
     }
-    final int mPreviewTextSizeLarge = config.getInt("preview_text_size");
+    final int mPreviewTextSizeLarge = config.style.getInt("preview_text_size");
     mPreviewText.setTextSize(mPreviewTextSizeLarge);
     mShowPreview = getPrefs().getKeyboard().getPopupKeyPressEnabled();
 
-    mPaint.setTypeface(config.getFont("key_font"));
-    mPaintSymbol.setTypeface(config.getFont("symbol_font"));
+    mPaint.setTypeface(FontManager.getTypeface(config.style.getString("key_font")));
+    mPaintSymbol.setTypeface(FontManager.getTypeface(config.style.getString("symbol_font")));
     mPaintSymbol.setColor(key_symbol_color);
     mPaintSymbol.setTextSize(mSymbolSize);
-    mPreviewText.setTypeface(config.getFont("preview_font"));
+    mPreviewText.setTypeface(FontManager.getTypeface(config.style.getString("preview_font")));
 
-    mEnterLabels = config.getmEnterLabels();
-    enterLabelMode = config.getInt("enter_label_mode");
+    handleEnterLabel(config);
+    enterLabelMode = config.style.getInt("enter_label_mode");
     invalidateAllKeys();
   }
 
@@ -1310,9 +1335,8 @@ public class KeyboardView extends View implements View.OnClickListener, Coroutin
       View mMiniKeyboardContainer = mMiniKeyboardCache.get(popupKey);
       final KeyboardView mMiniKeyboard;
       if (mMiniKeyboardContainer == null) {
-        final LayoutInflater inflater =
-            (LayoutInflater) getContext().getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-        mMiniKeyboardContainer = inflater.inflate(mPopupLayout, null);
+        mMiniKeyboardContainer =
+            SystemServicesKt.getLayoutInflater(this).inflate(mPopupLayout, null);
         mMiniKeyboard = mMiniKeyboardContainer.findViewById(android.R.id.keyboardView);
         final View closeButton = mMiniKeyboardContainer.findViewById(android.R.id.closeButton);
         if (closeButton != null) closeButton.setOnClickListener(this);
@@ -1351,13 +1375,9 @@ public class KeyboardView extends View implements View.OnClickListener, Coroutin
         final Keyboard keyboard;
         if (popupKey.getPopupCharacters() != null) {
           keyboard =
-              new Keyboard(
-                  getContext(),
-                  popupKey.getPopupCharacters(),
-                  -1,
-                  getPaddingLeft() + getPaddingRight());
+              new Keyboard(popupKey.getPopupCharacters(), -1, getPaddingLeft() + getPaddingRight());
         } else {
-          keyboard = new Keyboard(getContext());
+          keyboard = new Keyboard();
         }
         mMiniKeyboard.setKeyboard(keyboard);
         mMiniKeyboard.setPopupParent(this);

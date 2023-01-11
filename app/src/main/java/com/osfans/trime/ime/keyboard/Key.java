@@ -19,7 +19,6 @@ package com.osfans.trime.ime.keyboard;
 
 import static android.view.KeyEvent.isModifierKey;
 
-import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.view.KeyCharacterMap;
@@ -58,7 +57,7 @@ public class Key {
         KEY_STATE_NORMAL // 5         "key_back_color"              按键背景
       };
 
-  public static Map<String, Map<String, String>> presetKeys;
+  public static Map<String, Map<String, Object>> presetKeys;
   private static final int EVENT_NUM = KeyEventType.values().length;
   public Event[] events = new Event[EVENT_NUM];
   public int edgeFlags;
@@ -112,7 +111,7 @@ public class Key {
    * @param parent 按鍵所在的{@link Keyboard 鍵盤}
    * @param mk 從YAML中解析得到的Map
    */
-  public Key(Context context, Keyboard parent, Map<String, Object> mk) {
+  public Key(Keyboard parent, Map<String, Object> mk) {
     this(parent);
     String s;
     Config config = Config.get();
@@ -142,16 +141,16 @@ public class Key {
     mKeyboard.setModiferKey(getCode(), this);
     key_text_size = ConfigGetter.getPixel(mk, "key_text_size", 0);
     symbol_text_size = ConfigGetter.getPixel(mk, "symbol_text_size", 0);
-    key_text_color = Config.getColor(mk, "key_text_color");
-    hilited_key_text_color = Config.getColor(mk, "hilited_key_text_color");
-    key_back_color = config.getDrawable(mk, "key_back_color");
-    hilited_key_back_color = config.getDrawable(mk, "hilited_key_back_color");
-    key_symbol_color = Config.getColor(mk, "key_symbol_color");
-    hilited_key_symbol_color = Config.getColor(mk, "hilited_key_symbol_color");
+    key_text_color = config.colors.getColor(mk, "key_text_color");
+    hilited_key_text_color = config.colors.getColor(mk, "hilited_key_text_color");
+    key_back_color = config.colors.getDrawable(mk, "key_back_color");
+    hilited_key_back_color = config.colors.getDrawable(mk, "hilited_key_back_color");
+    key_symbol_color = config.colors.getColor(mk, "key_symbol_color");
+    hilited_key_symbol_color = config.colors.getColor(mk, "hilited_key_symbol_color");
     round_corner = ConfigGetter.getFloat(mk, "round_corner", 0);
   }
 
-  public static Map<String, Map<String, String>> getPresetKeys() {
+  public static Map<String, Map<String, Object>> getPresetKeys() {
     return presetKeys;
   }
 

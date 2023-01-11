@@ -1,12 +1,9 @@
-package com.osfans.trime.data.db.clipboard
+package com.osfans.trime.data.db
 
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.room.Room
 import com.osfans.trime.data.AppPrefs
-import com.osfans.trime.data.db.Database
-import com.osfans.trime.data.db.DatabaseBean
-import com.osfans.trime.data.db.DatabaseDao
 import com.osfans.trime.util.StringUtils.mismatch
 import com.osfans.trime.util.StringUtils.replace
 import com.osfans.trime.util.WeakHashSet
@@ -48,9 +45,9 @@ object ClipboardHelper :
         onUpdateListeners.remove(listener)
     }
 
-    private val limit get() = AppPrefs.defaultInstance().other.clipboardLimit.toInt()
-    private val compare get() = AppPrefs.defaultInstance().other.clipboardCompareRules
-    private val output get() = AppPrefs.defaultInstance().other.clipboardOutputRules
+    private val limit get() = AppPrefs.defaultInstance().clipboard.clipboardLimit
+    private val compare get() = AppPrefs.defaultInstance().clipboard.clipboardCompareRules
+    private val output get() = AppPrefs.defaultInstance().clipboard.clipboardOutputRules
 
     var lastBean: DatabaseBean? = null
 

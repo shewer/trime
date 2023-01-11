@@ -1,17 +1,20 @@
 package com.osfans.trime.ime.keyboard
 
-import android.content.Context
 import android.inputmethodservice.InputMethodService
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.SoundPool
 import android.os.Build
 import android.os.VibrationEffect
-import android.os.Vibrator
 import android.speech.tts.TextToSpeech
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import com.osfans.trime.data.AppPrefs
+import com.osfans.trime.data.sound.SoundThemeManager
+import com.osfans.trime.util.audioManager
+import com.osfans.trime.util.vibrator
+import timber.log.Timber
 import java.util.Locale
-import kotlin.math.ln
 
 /**
  * Manage the key press effects, such as vibration, sound, speaking and so on.
@@ -19,19 +22,42 @@ import kotlin.math.ln
 class InputFeedbackManager(
     private val ims: InputMethodService
 ) {
-    private val prefs: AppPrefs = AppPrefs.defaultInstance()
+    private val prefs: AppPrefs get() = AppPrefs.defaultInstance()
 
-    private var vibrator: Vibrator? = null
-    private var audioManager: AudioManager? = null
     private var tts: TextToSpeech? = null
+    private var soundPool: SoundPool? = null
+
+    private var playProgress = -1
+    private var lastPressedKeycode = 0
+    private val soundIds: MutableList<Int> = mutableListOf()
 
     init {
         try {
-            vibrator = ims.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            audioManager = ims.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            tts = TextToSpeech(ims.applicationContext) { }
+            tts = TextToSpeech(ims) { }
+            SoundThemeManager.init()
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    fun resumeSoundPool() {
+        SoundThemeManager.getActiveSoundFilePaths().onSuccess { path ->
+            soundPool = SoundPool.Builder()
+                .setMaxStreams(1)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setLegacyStreamType(AudioManager.STREAM_SYSTEM)
+                        .build()
+                ).build()
+            soundIds.clear()
+            soundIds.addAll(path.map { soundPool!!.load(it, 1) })
+        }
+    }
+
+    fun releaseSoundPool() {
+        SoundThemeManager.getActiveSoundTheme().onSuccess {
+            soundPool?.release()
+            soundPool = null
         }
     }
 
@@ -61,14 +87,14 @@ class InputFeedbackManager(
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(
+                vibrator.vibrate(
                     VibrationEffect.createOneShot(
                         vibrationDuration, vibrationAmplitude
                     )
                 )
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(vibrationDuration)
+                vibrator.vibrate(vibrationDuration)
             }
         }
     }
@@ -76,36 +102,53 @@ class InputFeedbackManager(
     /** Text to Speech engine's language getter and setter */
     var ttsLanguage: Locale?
         get() {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                tts?.voice?.locale
-            } else {
-                @Suppress("DEPRECATION")
-                tts?.language
-            }
+            return tts?.voice?.locale
         }
         set(v) { tts?.language = v }
+
+    fun resetPlayProgress() {
+        if (playProgress > 0) playProgress = 0
+    }
+
+    private fun playCustomSoundEffect(keycode: Int, volume: Float) {
+        SoundThemeManager.getActiveSoundTheme().onSuccess { theme ->
+            if (theme.sound.isEmpty()) return
+            val sounds = theme.sound
+            val melody = theme.melody
+            var currentSoundId = 0
+            if (playProgress > -1) {
+                if (melody.isNullOrEmpty()) return
+                currentSoundId = sounds.indexOf(melody[playProgress])
+                playProgress = (playProgress + 1) % melody.size
+            } else if (keycode != lastPressedKeycode) {
+                lastPressedKeycode = keycode
+                currentSoundId = theme.keyset.find { it.soundId(keycode) >= 0 }?.soundId(keycode) ?: 0
+                Timber.d("play without melody: currentSoundId=$currentSoundId, soundIds.size=${soundIds.size}")
+            }
+            soundPool?.play(soundIds[currentSoundId], volume, volume, 1, 0, 1f)
+        }
+    }
 
     /**
      * Makes a key press sound if the user has this feature enabled in the preferences.
      */
-    fun keyPressSound(keyCode: Int? = null) {
+    fun keyPressSound(keyCode: Int = 0) {
         if (prefs.keyboard.soundEnabled) {
-            val soundVolume = prefs.keyboard.soundVolume
-            if (Sound.isEnable())
-                Sound.get().play(keyCode, soundVolume)
-            else {
-                if (soundVolume > 0) {
-                    val effect = when (keyCode) {
-                        KeyEvent.KEYCODE_SPACE -> AudioManager.FX_KEYPRESS_SPACEBAR
-                        KeyEvent.KEYCODE_DEL -> AudioManager.FX_KEYPRESS_DELETE
-                        KeyEvent.KEYCODE_ENTER -> AudioManager.FX_KEYPRESS_RETURN
-                        else -> AudioManager.FX_KEYPRESS_STANDARD
-                    }
-                    audioManager!!.playSoundEffect(
-                        effect,
-                        (1 - (ln((101.0 - soundVolume)) / ln(101.0))).toFloat()
-                    )
+            val soundVolume = prefs.keyboard.soundVolume / 100f
+            if (soundVolume <= 0) return
+            if (prefs.keyboard.customSoundEnabled) {
+                playCustomSoundEffect(keyCode, soundVolume)
+            } else {
+                val effect = when (keyCode) {
+                    KeyEvent.KEYCODE_SPACE -> AudioManager.FX_KEYPRESS_SPACEBAR
+                    KeyEvent.KEYCODE_DEL -> AudioManager.FX_KEYPRESS_DELETE
+                    KeyEvent.KEYCODE_ENTER -> AudioManager.FX_KEYPRESS_RETURN
+                    else -> AudioManager.FX_KEYPRESS_STANDARD
                 }
+                audioManager.playSoundEffect(
+                    effect,
+                    soundVolume
+                )
             }
         }
     }
@@ -136,19 +179,12 @@ class InputFeedbackManager(
             else -> null
         } ?: return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "TrimeTTS")
-        } else {
-            @Suppress("DEPRECATION")
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null)
-        }
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "TrimeTTS")
     }
 
     fun destroy() {
-        vibrator = null
-        audioManager = null
-        if (tts != null) {
-            tts?.stop().also { tts = null }
-        }
+        tts?.stop()
+        tts = null
+        releaseSoundPool()
     }
 }

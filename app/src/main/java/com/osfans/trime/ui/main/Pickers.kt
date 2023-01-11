@@ -6,12 +6,14 @@ import androidx.appcompat.app.AlertDialog
 import com.osfans.trime.R
 import com.osfans.trime.core.Rime
 import com.osfans.trime.data.AppPrefs
-import com.osfans.trime.data.sound.SoundManager
+import com.osfans.trime.data.sound.SoundTheme
+import com.osfans.trime.data.sound.SoundThemeManager
 import com.osfans.trime.data.theme.Config
 import com.osfans.trime.data.theme.ThemeManager
 import com.osfans.trime.ime.core.Trime
 import com.osfans.trime.ui.components.CoroutineChoiceDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 suspend fun Context.themePicker(
     @StyleRes themeResId: Int = 0
@@ -23,16 +25,18 @@ suspend fun Context.themePicker(
             items = ThemeManager.getAllThemes()
                 .map { it.substringBeforeLast('.') }
                 .toTypedArray()
-            val current = Config.get().theme.substringBeforeLast('.')
+            val current = ThemeManager.getActiveTheme().substringBeforeLast('.')
             checkedItem = items.indexOf(current)
         }
         postiveDispatcher = Dispatchers.Default
         onOKButton {
             with(items[checkedItem].toString()) {
-                Config.get().theme =
-                    if (this == "trime") this else "$this.trime"
+                ThemeManager.switchTheme(if (this == "trime") this else "$this.trime")
+                Config.get().init()
             }
-            Trime.getServiceOrNull()?.initKeyboard()
+            launch {
+                Trime.getServiceOrNull()?.initKeyboard()
+            }
         }
     }.create()
 }
@@ -56,7 +60,9 @@ suspend fun Context.colorPicker(
             val all = Config.get().presetColorSchemes
             val schemeIds = all.map { it.first }
             prefs.themeAndColor.selectedColor = schemeIds[checkedItem]
-            Trime.getServiceOrNull()?.initKeyboard() // 立刻重初始化键盘生效
+            launch {
+                Trime.getServiceOrNull()?.initKeyboard() // 立刻重初始化键盘生效
+            }
         }
     }.create()
 }
@@ -89,23 +95,21 @@ suspend fun Context.schemaPicker(
     }.create()
 }
 
-suspend fun Context.soundPicker(
+fun Context.soundPicker(
     @StyleRes themeResId: Int = 0
 ): AlertDialog {
-    return CoroutineChoiceDialog(this, themeResId).apply {
-        title = getString(R.string.keyboard__key_sound_package_title)
-        initDispatcher = Dispatchers.IO
-        onInit {
-            items = SoundManager.getAllSounds()
-                .map { it.substringBeforeLast('.') }
-                .toTypedArray()
-            val current = Config.get().soundPackage
-                .substringBeforeLast('.')
-            checkedItem = items.indexOf(current)
+    val all = SoundThemeManager.getAllSoundThemes().mapNotNull(SoundTheme::name)
+    val current = SoundThemeManager.getActiveSoundTheme().getOrNull()?.name ?: ""
+    var checked = all.indexOf(current)
+    return AlertDialog.Builder(this, themeResId)
+        .setTitle(R.string.keyboard__key_sound_package_title)
+        .setSingleChoiceItems(
+            all.toTypedArray(),
+            checked
+        ) { _, id -> checked = id }
+        .setPositiveButton(android.R.string.ok) { _, _ ->
+            SoundThemeManager.switchSound(all[checked])
         }
-        postiveDispatcher = Dispatchers.Default
-        onOKButton {
-            Config.get().soundPackage = "${items[checkedItem]}.sound"
-        }
-    }.create()
+        .setNegativeButton(android.R.string.cancel, null)
+        .create()
 }

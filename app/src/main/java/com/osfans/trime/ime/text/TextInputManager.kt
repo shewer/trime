@@ -5,10 +5,11 @@ import android.text.InputType
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
 import androidx.appcompat.app.AlertDialog
+import androidx.lifecycle.lifecycleScope
 import com.osfans.trime.R
 import com.osfans.trime.core.Rime
+import com.osfans.trime.core.RimeEvent
 import com.osfans.trime.data.AppPrefs
 import com.osfans.trime.data.theme.Config
 import com.osfans.trime.databinding.InputRootBinding
@@ -28,11 +29,15 @@ import com.osfans.trime.ui.main.schemaPicker
 import com.osfans.trime.ui.main.soundPicker
 import com.osfans.trime.ui.main.themePicker
 import com.osfans.trime.util.ShortcutUtils
+import com.osfans.trime.util.inputMethodManager
 import com.osfans.trime.util.startsWithAsciiChar
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.Locale
@@ -57,11 +62,8 @@ class TextInputManager private constructor() :
     private val prefs get() = AppPrefs.defaultInstance()
     private val activeEditorInstance: EditorInstance
         get() = trime.activeEditorInstance
-    private val keyboardSwitcher: KeyboardSwitcher
-        get() = trime.keyboardSwitcher
-    private val imeManager: InputMethodManager
-        get() = trime.imeManager
     private var intentReceiver: IntentReceiver? = null
+    private var rimeNotiHandlerJob: Job? = null
 
     private var mainKeyboardView: KeyboardView? = null
     var candidateRoot: ScrollView? = null
@@ -84,7 +86,6 @@ class TextInputManager private constructor() :
         private val DELIMITER_SPLITTER = """[-_]""".toRegex()
         private var instance: TextInputManager? = null
 
-        @Synchronized
         fun getInstance(): TextInputManager {
             if (instance == null) {
                 instance = TextInputManager()
@@ -107,11 +108,14 @@ class TextInputManager private constructor() :
         intentReceiver = IntentReceiver().also {
             it.registerReceiver(trime)
         }
+        rimeNotiHandlerJob = Rime.get().rimeNotiFlow
+            .onEach(::handleRimeNotification)
+            .launchIn(trime.lifecycleScope)
 
         val imeConfig = Config.get()
         var s =
-            if (imeConfig.getString("locale").isNullOrEmpty()) {
-                imeConfig.getString("locale")
+            if (imeConfig.style.getString("locale").isNullOrEmpty()) {
+                imeConfig.style.getString("locale")
             } else ""
         if (s.contains(DELIMITER_SPLITTER)) {
             val lc = s.split(DELIMITER_SPLITTER)
@@ -124,8 +128,8 @@ class TextInputManager private constructor() :
             locales[0] = Locale.getDefault()
         }
 
-        s = if (imeConfig.getString("latin_locale").isNullOrEmpty()) {
-            imeConfig.getString("latin_locale")
+        s = if (imeConfig.style.getString("latin_locale").isNullOrEmpty()) {
+            imeConfig.style.getString("latin_locale")
         } else "en_US"
         if (s.contains(DELIMITER_SPLITTER)) {
             val lc = s.split(DELIMITER_SPLITTER)
@@ -184,6 +188,8 @@ class TextInputManager private constructor() :
         mainKeyboardView = null
 
         cancel()
+        rimeNotiHandlerJob?.cancel()
+        rimeNotiHandlerJob = null
         instance = null
     }
 
@@ -237,17 +243,17 @@ class TextInputManager private constructor() :
                 }
             }
 
-        keyboardSwitcher.let {
-            it.resize(trime.maxWidth)
+        KeyboardSwitcher.run {
+            resize(trime.maxWidth)
             // Select a keyboard based on the input type of the editing field.
-            it.startKeyboard(keyboardType)
+            switchKeyboard(keyboardType)
         }
         Rime.get()
 
         // style/reset_ascii_mode指定了弹出键盘时是否重置ASCII状态。
         // 键盘的reset_ascii_mode指定了重置时是否重置到keyboard的ascii_mode描述的状态。
-        if (shouldResetAsciiMode && keyboardSwitcher.currentKeyboard.isResetAsciiMode) {
-            tempAsciiMode = keyboardSwitcher.currentKeyboard.asciiMode
+        if (shouldResetAsciiMode && KeyboardSwitcher.currentKeyboard.isResetAsciiMode) {
+            tempAsciiMode = KeyboardSwitcher.currentKeyboard.asciiMode
         }
         tempAsciiMode?.let { Rime.setOption("ascii_mode", it) }
         isComposable = isComposable && !Rime.isEmpty()
@@ -257,41 +263,48 @@ class TextInputManager private constructor() :
         }
     }
 
-    fun onOptionChanged(option: String, value: Boolean) {
-        when (option) {
-            "ascii_mode" -> {
-                trime.inputFeedbackManager.ttsLanguage =
-                    locales[if (value) 1 else 0]
+    private fun handleRimeNotification(event: RimeEvent) {
+        if (event is RimeEvent.SchemaEvent) {
+            Rime.initSchema()
+            trime.initKeyboard()
+        } else if (event is RimeEvent.OptionEvent) {
+            Rime.getContexts() // 切換中英文、簡繁體時更新候選
+            val value = event.value
+            when (val option = event.option) {
+                "ascii_mode" -> {
+                    trime.inputFeedbackManager.ttsLanguage =
+                        locales[if (value) 1 else 0]
+                }
+                "_hide_comment" -> trime.setShowComment(!value)
+                "_hide_candidate" -> {
+                    candidateRoot?.visibility = if (!value) View.VISIBLE else View.GONE
+                    trime.setCandidatesViewShown(isComposable && !value)
+                }
+                "_liquid_keyboard" -> trime.selectLiquidKeyboard(0)
+                "_hide_key_hint" -> if (mainKeyboardView != null) mainKeyboardView!!.setShowHint(!value)
+                "_hide_key_symbol" -> if (mainKeyboardView != null) mainKeyboardView!!.setShowSymbol(!value)
+                else -> if (option.startsWith("_keyboard_") &&
+                    option.length > 10 && value
+                ) {
+                    val keyboard = option.substring(10)
+                    KeyboardSwitcher.switchKeyboard(keyboard)
+                    trime.bindKeyboardToInputView()
+                } else if (option.startsWith("_key_") && option.length > 5 && value) {
+                    shouldUpdateRimeOption = false // 防止在 handleRimeNotification 中 setOption
+                    val key = option.substring(5)
+                    onEvent(Event(key))
+                    shouldUpdateRimeOption = true
+                } else if (option.startsWith("_one_hand_mode")) {
+                    /*
+                    val c = option[option.length - 1]
+                    if (c == '1' && value) oneHandMode = 1 else if (c == '2' && value) oneHandMode =
+                        2 else if (c == '3') oneHandMode = if (value) 1 else 2 else oneHandMode = 0
+                    trime.loadBackground()
+                    trime.initKeyboard() */
+                }
             }
-            "_hide_comment" -> trime.setShowComment(!value)
-            "_hide_candidate" -> {
-                candidateRoot?.visibility = if (!value) View.VISIBLE else View.GONE
-                trime.setCandidatesViewShown(isComposable && !value)
-            }
-            "_liquid_keyboard" -> trime.selectLiquidKeyboard(0)
-            "_hide_key_hint" -> if (mainKeyboardView != null) mainKeyboardView!!.setShowHint(!value)
-            "_hide_key_symbol" -> if (mainKeyboardView != null) mainKeyboardView!!.setShowSymbol(!value)
-            else -> if (option.startsWith("_keyboard_") &&
-                option.length > 10 && value
-            ) {
-                val keyboard = option.substring(10)
-                keyboardSwitcher.switchToKeyboard(keyboard)
-                trime.bindKeyboardToInputView()
-            } else if (option.startsWith("_key_") && option.length > 5 && value) {
-                shouldUpdateRimeOption = false // 防止在 handleRimeNotification 中 setOption
-                val key = option.substring(5)
-                onEvent(Event(key))
-                shouldUpdateRimeOption = true
-            } else if (option.startsWith("_one_hand_mode")) {
-                /*
-                val c = option[option.length - 1]
-                if (c == '1' && value) oneHandMode = 1 else if (c == '2' && value) oneHandMode =
-                    2 else if (c == '3') oneHandMode = if (value) 1 else 2 else oneHandMode = 0
-                trime.loadBackground()
-                trime.initKeyboard() */
-            }
+            mainKeyboardView?.invalidateAllKeys()
         }
-        mainKeyboardView?.invalidateAllKeys()
     }
 
     override fun onPress(keyEventCode: Int) {
@@ -310,7 +323,7 @@ class TextInputManager private constructor() :
         if (needSendUpRimeKey) {
             if (shouldUpdateRimeOption) {
                 Rime.setOption("soft_cursors", prefs.keyboard.softCursorEnabled)
-                Rime.setOption("_horizontal", trime.imeConfig.getBoolean("horizontal"))
+                Rime.setOption("_horizontal", trime.imeConfig.style.getBoolean("horizontal"))
                 shouldUpdateRimeOption = false
             }
             // todo 释放按键可能不对
@@ -338,9 +351,11 @@ class TextInputManager private constructor() :
                 activeEditorInstance.commitRimeText()
             }
             KeyEvent.KEYCODE_EISU -> { // Switch keyboard
-                keyboardSwitcher.switchToKeyboard(event.select)
+                KeyboardSwitcher.switchKeyboard(event.select)
                 /** Set ascii mode according to keyboard's settings, can not place into [Rime.handleRimeNotification] */
-                Rime.setOption("ascii_mode", keyboardSwitcher.asciiMode)
+                if (shouldResetAsciiMode && KeyboardSwitcher.currentKeyboard.isResetAsciiMode) {
+                    Rime.setOption("ascii_mode", KeyboardSwitcher.currentKeyboard.asciiMode)
+                }
                 trime.bindKeyboardToInputView()
                 trime.updateComposing()
             }
@@ -353,7 +368,7 @@ class TextInputManager private constructor() :
                         trime.switchToPrevIme()
                     }
                     else -> {
-                        imeManager.showInputMethodPicker()
+                        inputMethodManager.showInputMethodPicker()
                     }
                 }
             }
@@ -420,7 +435,7 @@ class TextInputManager private constructor() :
             }
             KeyEvent.KEYCODE_MENU -> showOptionsDialog()
             else -> {
-                if (event.mask == 0 && trime.keyboardSwitcher.currentKeyboard.isOnlyShiftOn) {
+                if (event.mask == 0 && KeyboardSwitcher.currentKeyboard.isOnlyShiftOn) {
                     if (event.code == KeyEvent.KEYCODE_SPACE && prefs.keyboard.hookShiftSpace) {
                         onKey(event.code, 0)
                         return
@@ -438,7 +453,7 @@ class TextInputManager private constructor() :
                     }
                 }
                 if (event.mask == 0)
-                    onKey(event.code, trime.keyboardSwitcher.currentKeyboard.modifer)
+                    onKey(event.code, KeyboardSwitcher.currentKeyboard.modifer)
                 else
                     onKey(event.code, event.mask)
             }
@@ -512,7 +527,7 @@ class TextInputManager private constructor() :
         onPress(0)
         if (!Rime.isComposing()) {
             if (index >= 0) {
-                Rime.toggleOption(index)
+                Rime.toggleSwitchOption(index)
                 trime.updateComposing()
             }
         } else if (prefs.keyboard.hookCandidate || index > 9) {
@@ -551,7 +566,7 @@ class TextInputManager private constructor() :
             .setIcon(R.mipmap.ic_app_icon)
             .setNegativeButton(R.string.other_ime) { dialog, _ ->
                 dialog.dismiss()
-                imeManager.showInputMethodPicker()
+                inputMethodManager.showInputMethodPicker()
             }
             .setPositiveButton(R.string.set_ime) { dialog, _ ->
                 trime.launchSettings()

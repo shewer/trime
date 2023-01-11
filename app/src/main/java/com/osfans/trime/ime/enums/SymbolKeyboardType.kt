@@ -1,8 +1,5 @@
 package com.osfans.trime.ime.enums
 
-import java.util.HashMap
-import java.util.Locale
-
 enum class SymbolKeyboardType {
     // 不占据tab位，仅当在“更多”面板，即“TABS”中显示时，产生换行效果
     NEW_ROW,
@@ -52,32 +49,22 @@ enum class SymbolKeyboardType {
     PAIR;
 
     companion object {
-        private val convertMap: HashMap<String, SymbolKeyboardType> = hashMapOf()
-
-        init {
-            for (type in values()) {
-                convertMap[type.toString()] = type
-            }
-        }
-
-        fun fromString(code: String): SymbolKeyboardType {
-            val type = convertMap[code.uppercase(Locale.getDefault())]
-            return type ?: SINGLE
-        }
-
-        fun fromObject(code: Any?): SymbolKeyboardType {
-            if (code == null)
-                return SINGLE
-            val type = convertMap[code.toString().uppercase(Locale.getDefault())]
-            return type ?: SINGLE
+        @JvmStatic
+        fun fromString(code: String?): SymbolKeyboardType {
+            code ?: return SINGLE
+            return runCatching {
+                valueOf(code.uppercase())
+            }.getOrDefault(SINGLE)
         }
 
         // 是否在liquidKeyboard键盘区域展示按键
+        @JvmStatic
         fun hasKeys(type: SymbolKeyboardType): Boolean {
             return type > HISTORY
         }
 
         // 是否呈现在liquidKeyboard键盘区域的tabs列表中
+        @JvmStatic
         fun hasKey(type: SymbolKeyboardType): Boolean {
             return type >= CLIPBOARD
         }

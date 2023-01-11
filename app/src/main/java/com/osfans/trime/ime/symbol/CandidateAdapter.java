@@ -13,6 +13,7 @@ import androidx.constraintlayout.widget.ConstraintSet;
 import androidx.recyclerview.widget.RecyclerView;
 import com.osfans.trime.core.Rime;
 import com.osfans.trime.data.theme.Config;
+import com.osfans.trime.data.theme.FontManager;
 import com.osfans.trime.databinding.LiquidKeyItemBinding;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,7 +55,7 @@ public class CandidateAdapter extends RecyclerView.Adapter<CandidateAdapter.View
       final ConstraintSet set = new ConstraintSet();
       set.clone(binding.getRoot());
       final CommentPosition commentPosition =
-          CommentPosition.values()[theme.getInt("comment_position")];
+          CommentPosition.values()[theme.style.getInt("comment_position")];
       switch (commentPosition) {
         case BOTTOM:
           set.centerHorizontally(binding.comment.getId(), ConstraintSet.PARENT_ID);
@@ -110,8 +111,8 @@ public class CandidateAdapter extends RecyclerView.Adapter<CandidateAdapter.View
   public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
     final Rime.RimeCandidate candidate = mCandidates.get(position);
 
-    final Typeface candidateFont = theme.getFont("candidate_font");
-    final Typeface commentFont = theme.getFont("comment_font");
+    final Typeface candidateFont = FontManager.getTypeface(theme.style.getString("candidate_font"));
+    final Typeface commentFont = FontManager.getTypeface(theme.style.getString("comment_font"));
     holder.candidate.setTypeface(candidateFont);
     holder.comment.setTypeface(commentFont);
 
@@ -120,20 +121,21 @@ public class CandidateAdapter extends RecyclerView.Adapter<CandidateAdapter.View
       holder.comment.setText(candidate.comment);
     }
 
-    final float candidateSize = theme.getFloat("candidate_text_size");
-    final float commentSize = theme.getFloat("comment_text_size");
+    final float candidateSize = theme.style.getFloat("candidate_text_size");
+    final float commentSize = theme.style.getFloat("comment_text_size");
     if (candidateSize > 0) holder.candidate.setTextSize(candidateSize);
     if (commentSize > 0) holder.comment.setTextSize(commentSize);
 
-    final int candidateColor = theme.getColor("candidate_text_color");
-    final int commentColor = theme.getColor("comment_text_color");
+    final int candidateColor = theme.colors.getColor("candidate_text_color");
+    final int commentColor = theme.colors.getColor("comment_text_color");
     holder.candidate.setTextColor(candidateColor);
     holder.comment.setTextColor(commentColor);
 
     //  点击前后必须使用相同类型的背景，或者全部为背景图，或者都为背景色
     // 如果直接使用background，会造成滚动时部分内容的背景填充错误的问题
     final Drawable background =
-        theme.getDrawable("key_back_color", "key_border", "key_border_color", "round_corner", null);
+        theme.colors.getDrawable(
+            "key_back_color", "key_border", "key_border_color", "round_corner", null);
     if (background != null) holder.itemView.setBackground(background);
 
     // 如果设置了回调，则设置点击事件
@@ -144,7 +146,7 @@ public class CandidateAdapter extends RecyclerView.Adapter<CandidateAdapter.View
     // 点击时产生背景变色效果
     holder.itemView.setOnTouchListener(
         (view, motionEvent) -> {
-          final int hilited = theme.getColor("hilited_candidate_text_color");
+          final int hilited = theme.colors.getColor("hilited_candidate_text_color");
           if (motionEvent.getAction() == MotionEvent.ACTION_DOWN) {
             holder.candidate.setTextColor(hilited);
           }
