@@ -15,17 +15,23 @@ object OpenCCDictManager {
         System.loadLibrary("rime_jni")
     }
 
-    private val openccDictDir = File(
-        DataManager.getDataDir("opencc")
-    ).also { it.mkdirs() }
+    val sharedDir = File(DataManager.sharedDataDir, "opencc").also { it.mkdirs() }
+    val userDir = File(DataManager.userDataDir, "opencc").also { it.mkdirs() }
 
-    fun dictionaries(): List<Dictionary> = openccDictDir
+    fun sharedDictionaries(): List<Dictionary> = sharedDir
         .listFiles()
-        ?.mapNotNull { Dictionary.new(it) }
-        ?.toList() ?: listOf()
+        ?.mapNotNull { Dictionary.new(it) } ?: listOf()
 
-    fun openccDictionaries(): List<OpenCCDictionary> =
-        dictionaries().mapNotNull { it as? OpenCCDictionary }
+    fun userDictionaries(): List<Dictionary> = userDir
+        .listFiles()
+        ?.mapNotNull { Dictionary.new(it) } ?: listOf()
+
+    fun getAllDictionaries(): List<Dictionary> =
+        if (sharedDir.path == userDir.path) userDictionaries()
+        else (sharedDictionaries() + userDictionaries())
+
+    fun openCCDictionaries(): List<OpenCCDictionary> =
+        getAllDictionaries().mapNotNull { it as? OpenCCDictionary }
 
     fun importFromFile(file: File): OpenCCDictionary {
         val raw = Dictionary.new(file)
@@ -34,7 +40,7 @@ object OpenCCDictManager {
         // preserve original file name
         val new = raw.toOpenCCDictionary(
             File(
-                openccDictDir,
+                userDir,
                 file.nameWithoutExtension + ".${Dictionary.Type.OPENCC.ext}"
             )
         )
@@ -46,8 +52,8 @@ object OpenCCDictManager {
      * Convert internal text dict to opencc format
      */
     @JvmStatic
-    fun internalDeploy() {
-        for (d in dictionaries()) {
+    fun buildOpenCCDict() {
+        for (d in getAllDictionaries()) {
             if (d is TextDictionary) {
                 val result: OpenCCDictionary
                 measureTimeMillis {
@@ -68,7 +74,26 @@ object OpenCCDictManager {
     }
 
     @JvmStatic
-    external fun openccDictConv(src: String, dest: String, mode: Boolean)
+    fun convertLine(input: String, configFileName: String): String {
+        if (configFileName.isEmpty()) return input
+        with(File(userDir, configFileName)) {
+            if (exists()) return openCCLineConv(input, path)
+        }
+        with(File(sharedDir, configFileName)) {
+            if (exists()) return openCCLineConv(input, path)
+        }
+        Timber.w("Specified config $configFileName doesn't exist, returning raw input ...")
+        return input
+    }
+
+    @JvmStatic
+    external fun openCCDictConv(src: String, dest: String, mode: Boolean)
+
+    @JvmStatic
+    external fun openCCLineConv(input: String, configFileName: String): String
+
+    @JvmStatic
+    external fun getOpenCCVersion(): String
 
     const val MODE_BIN_TO_TXT = true // OCD2 to TXT
     const val MODE_TXT_TO_BIN = false // TXT to OCD2

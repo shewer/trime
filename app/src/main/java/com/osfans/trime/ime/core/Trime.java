@@ -21,7 +21,6 @@ package com.osfans.trime.ime.core;
 import static android.graphics.Color.parseColor;
 
 import android.app.Dialog;
-import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.RectF;
@@ -80,15 +79,14 @@ import com.osfans.trime.ime.text.Candidate;
 import com.osfans.trime.ime.text.Composition;
 import com.osfans.trime.ime.text.ScrollView;
 import com.osfans.trime.ime.text.TextInputManager;
-import com.osfans.trime.ui.main.PrefMainActivity;
 import com.osfans.trime.util.DimensionsKt;
 import com.osfans.trime.util.ShortcutUtils;
 import com.osfans.trime.util.StringUtils;
-import com.osfans.trime.util.SystemServicesKt;
 import com.osfans.trime.util.ViewUtils;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import splitties.bitflags.BitFlagsKt;
+import splitties.systemservices.SystemServicesKt;
 import timber.log.Timber;
 
 /** {@link InputMethodService 輸入法}主程序 */
@@ -121,10 +119,11 @@ public class Trime extends LifecycleInputMethodService {
   public InputFeedbackManager inputFeedbackManager = null; // 效果管理器
   private IntentReceiver mIntentReceiver = null;
 
+  public EditorInfo editorInfo = null;
+
   private boolean isWindowShown = false; // 键盘窗口是否已显示
 
   private boolean isAutoCaps; // 句首自動大寫
-  private final Locale[] locales = new Locale[2];
 
   private int oneHandMode = 0; // 单手键盘模式
   public EditorInstance activeEditorInstance;
@@ -235,7 +234,7 @@ public class Trime extends LifecycleInputMethodService {
       new Handler(
           msg -> {
             if (!((Trime) msg.obj).isShowInputRequested()) { // 若当前没有输入面板，则后台同步。防止面板关闭后5秒内再次打开
-              ShortcutUtils.INSTANCE.syncInBackground((Trime) msg.obj);
+              ShortcutUtils.INSTANCE.syncInBackground();
               ((Trime) msg.obj).loadConfig();
             }
             return false;
@@ -597,11 +596,6 @@ public class Trime extends LifecycleInputMethodService {
     inputFeedbackManager = null;
     inputRootBinding = null;
 
-    if (getPrefs().getOther().getDestroyOnQuit()) {
-      Rime.destroy();
-      getImeConfig().destroy();
-      System.exit(0); // 清理內存
-    }
     for (EventListener listener : eventListeners) {
       if (listener != null) listener.onDestroy();
     }
@@ -609,6 +603,35 @@ public class Trime extends LifecycleInputMethodService {
     super.onDestroy();
 
     self = null;
+  }
+
+  private void handleReturnKey() {
+    if (editorInfo == null) sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER);
+    if ((editorInfo.inputType & InputType.TYPE_MASK_CLASS) == InputType.TYPE_NULL) {
+      sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER);
+    }
+    if (BitFlagsKt.hasFlag(editorInfo.imeOptions, EditorInfo.IME_FLAG_NO_ENTER_ACTION)) {
+      final InputConnection ic = getCurrentInputConnection();
+      if (ic != null) ic.commitText("\n", 1);
+      return;
+    }
+    if (!TextUtils.isEmpty(editorInfo.actionLabel)
+        && editorInfo.actionId != EditorInfo.IME_ACTION_UNSPECIFIED) {
+      final InputConnection ic = getCurrentInputConnection();
+      if (ic != null) ic.performEditorAction(editorInfo.actionId);
+      return;
+    }
+    final int action = editorInfo.imeOptions & EditorInfo.IME_MASK_ACTION;
+    final InputConnection ic = getCurrentInputConnection();
+    switch (action) {
+      case EditorInfo.IME_ACTION_UNSPECIFIED:
+      case EditorInfo.IME_ACTION_NONE:
+        if (ic != null) ic.commitText("\n", 1);
+        break;
+      default:
+        if (ic != null) ic.performEditorAction(action);
+        break;
+    }
   }
 
   @Override
@@ -738,8 +761,15 @@ public class Trime extends LifecycleInputMethodService {
   }
 
   @Override
+  public void onStartInput(EditorInfo attribute, boolean restarting) {
+    editorInfo = attribute;
+    Timber.d("onStartInput: restarting=%s", restarting);
+  }
+
+  @Override
   public void onStartInputView(EditorInfo attribute, boolean restarting) {
-    super.onStartInputView(attribute, restarting);
+    Timber.d("onStartInputView: restarting=%s", restarting);
+    editorInfo = attribute;
     if (getPrefs().getThemeAndColor().getAutoDark()) {
       int nightModeFlags =
           getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
@@ -847,6 +877,12 @@ public class Trime extends LifecycleInputMethodService {
     }
   }
 
+  @Override
+  public void onFinishInput() {
+    editorInfo = null;
+    super.onFinishInput();
+  }
+
   public void bindKeyboardToInputView() {
     if (mainKeyboardView != null) {
       // Bind the selected keyboard to the input view.
@@ -898,7 +934,7 @@ public class Trime extends LifecycleInputMethodService {
   public boolean onRimeKey(int[] event) {
     updateRimeOption();
     // todo 改为异步处理按键事件、刷新UI
-    final boolean ret = Rime.onKey(event);
+    final boolean ret = Rime.processKey(event[0], event[1]);
     activeEditorInstance.commitRimeText();
     return ret;
   }
@@ -967,13 +1003,9 @@ public class Trime extends LifecycleInputMethodService {
     }
 
     final int unicodeChar = event.getUnicodeChar();
-    final String s = String.valueOf((char) unicodeChar);
-    final int i = Event.getClickCode(s);
-    int mask = 0;
-    if (i > 0) {
-      keyCode = i;
-    } else { // 空格、回車等
-      mask = event.getMetaState();
+    int mask = event.getMetaState();
+    if (unicodeChar > 0) {
+      keyCode = unicodeChar;
     }
     final boolean ret = handleKey(keyCode, mask);
     if (isComposing()) setCandidatesViewShown(textInputManager.isComposable()); // 藍牙鍵盤打字時顯示候選欄
@@ -1104,7 +1136,7 @@ public class Trime extends LifecycleInputMethodService {
             ExtractedText et = ic.getExtractedText(etr, 0);
             if (et == null) {
               Timber.d("hookKeyboard paste, et == null, try commitText");
-              if (ic.commitText(ShortcutUtils.INSTANCE.pasteFromClipboard(self), 1)) {
+              if (ic.commitText(ShortcutUtils.pasteFromClipboard(this), 1)) {
                 return true;
               }
             } else if (ic.performContextMenuAction(android.R.id.paste)) {
@@ -1209,17 +1241,6 @@ public class Trime extends LifecycleInputMethodService {
     dialog.show();
   }
 
-  /** Hides the IME and launches {@link PrefMainActivity}. */
-  public void launchSettings() {
-    requestHideSelf(0);
-    final Intent i = new Intent(this, PrefMainActivity.class);
-    i.addFlags(
-        Intent.FLAG_ACTIVITY_NEW_TASK
-            | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-            | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-    getApplicationContext().startActivity(i);
-  }
-
   /**
    * 如果爲{@link KeyEvent#KEYCODE_ENTER 回車鍵}，則換行
    *
@@ -1229,11 +1250,7 @@ public class Trime extends LifecycleInputMethodService {
   private boolean performEnter(int keyCode) { // 回車
     if (keyCode == KeyEvent.KEYCODE_ENTER) {
       DraftHelper.INSTANCE.onInputEventChanged();
-      if (textInputManager.getPerformEnterAsLineBreak()) {
-        commitText("\n");
-      } else {
-        sendKeyChar('\n');
-      }
+      handleReturnKey();
       return true;
     }
     return false;

@@ -11,8 +11,8 @@ import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import com.osfans.trime.data.AppPrefs
 import com.osfans.trime.data.sound.SoundThemeManager
-import com.osfans.trime.util.audioManager
-import com.osfans.trime.util.vibrator
+import splitties.systemservices.audioManager
+import splitties.systemservices.vibrator
 import timber.log.Timber
 import java.util.Locale
 
@@ -72,7 +72,12 @@ class InputFeedbackManager(
             val hapticsPerformed = if (vibrationDuration < 0) {
                 ims.window?.window?.decorView?.performHapticFeedback(
                     HapticFeedbackConstants.KEYBOARD_TAP,
-                    HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+                    } else {
+                        @Suppress("DEPRECATION")
+                        HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING or HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING
+                    }
                 )
             } else {
                 false

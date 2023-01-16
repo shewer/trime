@@ -120,6 +120,10 @@ public:
     jmethodID ArrayListInit;
     jmethodID ArrayListAdd;
 
+    jclass Pair;
+    jmethodID PairFirst;
+    jmethodID PairSecond;
+
     jclass Rime;
     jmethodID HandleRimeNotification;
 
@@ -130,16 +134,13 @@ public:
     jfieldID RimeCompositionSelEnd;
     jfieldID RimeCompositionPreedit;
 
-    jclass RimeCandidate;
-    jfieldID RimeCandidateText;
-    jfieldID RimeCandidateComment;
+    jclass CandidateListItem;
+    jmethodID CandidateListItemInit;
 
     jclass RimeCommit;
-    jfieldID RimeCommitDataSize;
     jfieldID RimeCommitText;
 
     jclass RimeContext;
-    jfieldID RimeContextDataSize;
     jfieldID RimeContextComposition;
     jfieldID RimeContextMenu;
     jfieldID RimeContextCommitTextPreview;
@@ -152,10 +153,8 @@ public:
     jfieldID RimeMenuHighlightedCandidateIndex;
     jfieldID RimeMenuNumCandidates;
     jfieldID RimeMenuCandidates;
-    jfieldID RimeMenuSelectKeys;
 
     jclass RimeStatus;
-    jfieldID RimeStatusDataSize;
     jfieldID RimeStatusSchemaId;
     jfieldID RimeStatusSchemaName;
     jfieldID RimeStatusDisable;
@@ -165,6 +164,9 @@ public:
     jfieldID RimeStatusSimplified;
     jfieldID RimeStatusTraditional;
     jfieldID RimeStatusAsciiPunct;
+
+    jclass SchemaListItem;
+    jmethodID SchemaListItemInit;
 
     GlobalRefSingleton(JavaVM *jvm_) : jvm(jvm_) {
         JNIEnv *env;
@@ -188,6 +190,10 @@ public:
         ArrayListInit = env->GetMethodID(ArrayList, "<init>", "(I)V");
         ArrayListAdd = env->GetMethodID(ArrayList, "add", "(ILjava/lang/Object;)V");
 
+        Pair = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("kotlin/Pair")));
+        PairFirst = env->GetMethodID(Pair, "getFirst", "()Ljava/lang/Object;");
+        PairSecond = env->GetMethodID(Pair, "getSecond", "()Ljava/lang/Object;");
+
         Rime = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/Rime")));
         HandleRimeNotification = env->GetStaticMethodID(Rime, "handleRimeNotification", "(Ljava/lang/String;Ljava/lang/String;)V");
 
@@ -198,16 +204,13 @@ public:
         RimeCompositionSelEnd = env->GetFieldID(RimeComposition, "sel_end", "I");
         RimeCompositionPreedit = env->GetFieldID(RimeComposition, "preedit", "Ljava/lang/String;");
 
-        RimeCandidate = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/Rime$RimeCandidate")));
-        RimeCandidateText = env->GetFieldID(RimeCandidate, "text", "Ljava/lang/String;");
-        RimeCandidateComment = env->GetFieldID(RimeCandidate, "comment", "Ljava/lang/String;");
+        CandidateListItem = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/CandidateListItem")));
+        CandidateListItemInit = env->GetMethodID(CandidateListItem, "<init>", "(Ljava/lang/String;Ljava/lang/String;)V");
 
         RimeCommit = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/Rime$RimeCommit")));
-        RimeCommitDataSize = env->GetFieldID(RimeCommit, "data_size", "I");
         RimeCommitText = env->GetFieldID(RimeCommit, "text", "Ljava/lang/String;");
 
         RimeContext = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/Rime$RimeContext")));
-        RimeContextDataSize = env->GetFieldID(RimeContext, "data_size", "I");
         RimeContextComposition = env->GetFieldID(RimeContext, "composition", "Lcom/osfans/trime/core/Rime$RimeComposition;");
         RimeContextMenu = env->GetFieldID(RimeContext, "menu", "Lcom/osfans/trime/core/Rime$RimeMenu;");
         RimeContextCommitTextPreview = env->GetFieldID(RimeContext, "commit_text_preview", "Ljava/lang/String;");
@@ -219,11 +222,9 @@ public:
         RimeMenuIsLastPage = env->GetFieldID(RimeMenu, "is_last_page", "Z");
         RimeMenuHighlightedCandidateIndex = env->GetFieldID(RimeMenu, "highlighted_candidate_index", "I");
         RimeMenuNumCandidates = env->GetFieldID(RimeMenu, "num_candidates", "I");
-        RimeMenuCandidates = env->GetFieldID(RimeMenu, "candidates", "[Lcom/osfans/trime/core/Rime$RimeCandidate;");
-        RimeMenuSelectKeys = env->GetFieldID(RimeMenu, "select_keys", "Ljava/lang/String;");
+        RimeMenuCandidates = env->GetFieldID(RimeMenu, "candidates", "[Lcom/osfans/trime/core/CandidateListItem;");
 
         RimeStatus = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/Rime$RimeStatus")));
-        RimeStatusDataSize = env->GetFieldID(RimeStatus, "data_size", "I");
         RimeStatusSchemaId = env->GetFieldID(RimeStatus, "schema_id", "Ljava/lang/String;");
         RimeStatusSchemaName = env->GetFieldID(RimeStatus, "schema_name", "Ljava/lang/String;");
         RimeStatusDisable = env->GetFieldID(RimeStatus, "is_disabled", "Z");
@@ -233,6 +234,9 @@ public:
         RimeStatusSimplified = env->GetFieldID(RimeStatus, "is_simplified", "Z");
         RimeStatusTraditional = env->GetFieldID(RimeStatus, "is_traditional", "Z");
         RimeStatusAsciiPunct = env->GetFieldID(RimeStatus, "is_ascii_punct", "Z");
+
+        SchemaListItem = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("com/osfans/trime/core/SchemaListItem")));
+        SchemaListItemInit = env->GetMethodID(SchemaListItem, "<init>", "(Ljava/lang/String;Ljava/lang/String;)V");
     }
 
     const JEnv AttachEnv() const { return JEnv(jvm); }

@@ -10,7 +10,9 @@ import androidx.lifecycle.lifecycleScope
 import com.osfans.trime.R
 import com.osfans.trime.core.Rime
 import com.osfans.trime.core.RimeEvent
+import com.osfans.trime.core.SchemaListItem
 import com.osfans.trime.data.AppPrefs
+import com.osfans.trime.data.schema.SchemaManager
 import com.osfans.trime.data.theme.Config
 import com.osfans.trime.databinding.InputRootBinding
 import com.osfans.trime.ime.broadcast.IntentReceiver
@@ -29,16 +31,13 @@ import com.osfans.trime.ui.main.schemaPicker
 import com.osfans.trime.ui.main.soundPicker
 import com.osfans.trime.ui.main.themePicker
 import com.osfans.trime.util.ShortcutUtils
-import com.osfans.trime.util.inputMethodManager
 import com.osfans.trime.util.startsWithAsciiChar
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.Runnable
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import splitties.systemservices.inputMethodManager
 import timber.log.Timber
 import java.util.Locale
 
@@ -54,7 +53,6 @@ import java.util.Locale
  * instance and the CandidateView.
  */
 class TextInputManager private constructor() :
-    CoroutineScope by MainScope(),
     Trime.EventListener,
     KeyboardView.OnKeyboardActionListener,
     Candidate.EventListener {
@@ -69,11 +67,10 @@ class TextInputManager private constructor() :
     var candidateRoot: ScrollView? = null
     var candidateView: Candidate? = null
 
-    var locales: Array<Locale> = Array(2) { Locale.getDefault() }
+    val locales = Array(2) { Locale.getDefault() }
 
     var needSendUpRimeKey: Boolean = false
     var shouldUpdateRimeOption: Boolean = true
-    var performEnterAsLineBreak: Boolean = false
     var isComposable: Boolean = false
     var shouldResetAsciiMode: Boolean = false
 
@@ -113,34 +110,18 @@ class TextInputManager private constructor() :
             .launchIn(trime.lifecycleScope)
 
         val imeConfig = Config.get()
-        var s =
-            if (imeConfig.style.getString("locale").isNullOrEmpty()) {
-                imeConfig.style.getString("locale")
-            } else ""
-        if (s.contains(DELIMITER_SPLITTER)) {
-            val lc = s.split(DELIMITER_SPLITTER)
-            if (lc.size == 3) {
-                locales[0] = Locale(lc[0], lc[1], lc[2])
-            } else {
-                locales[0] = Locale(lc[0], lc[1])
-            }
-        } else {
-            locales[0] = Locale.getDefault()
+        val defaultLocale = imeConfig.style.getString("locale").split(DELIMITER_SPLITTER)
+        locales[0] = when (defaultLocale.size) {
+            3 -> Locale(defaultLocale[0], defaultLocale[1], defaultLocale[2])
+            2 -> Locale(defaultLocale[0], defaultLocale[1])
+            else -> Locale.getDefault()
         }
 
-        s = if (imeConfig.style.getString("latin_locale").isNullOrEmpty()) {
-            imeConfig.style.getString("latin_locale")
-        } else "en_US"
-        if (s.contains(DELIMITER_SPLITTER)) {
-            val lc = s.split(DELIMITER_SPLITTER)
-            if (lc.size == 3) {
-                locales[1] = Locale(lc[0], lc[1], lc[2])
-            } else {
-                locales[1] = Locale(lc[0], lc[1])
-            }
-        } else {
-            locales[0] = Locale.ENGLISH
-            locales[1] = Locale(s)
+        val latinLocale = imeConfig.style.getString("latin_locale").split(DELIMITER_SPLITTER)
+        locales[1] = when (latinLocale.size) {
+            3 -> Locale(latinLocale[0], latinLocale[1], latinLocale[2])
+            2 -> Locale(latinLocale[0], latinLocale[1])
+            else -> Locale.US
         }
         // preload all required parameters
         trime.loadConfig()
@@ -187,7 +168,6 @@ class TextInputManager private constructor() :
         mainKeyboardView?.setOnKeyboardActionListener(null)
         mainKeyboardView = null
 
-        cancel()
         rimeNotiHandlerJob?.cancel()
         rimeNotiHandlerJob = null
         instance = null
@@ -197,9 +177,8 @@ class TextInputManager private constructor() :
         super.onStartInputView(instance, restarting)
         Trime.getService().selectLiquidKeyboard(-1)
         isComposable = false
-        performEnterAsLineBreak = false
         var tempAsciiMode = if (shouldResetAsciiMode) false else null
-        var keyboardType =
+        val keyboardType =
             when (instance.editorInfo!!.imeOptions and EditorInfo.IME_FLAG_FORCE_ASCII) {
                 EditorInfo.IME_FLAG_FORCE_ASCII -> {
                     tempAsciiMode = true
@@ -207,6 +186,7 @@ class TextInputManager private constructor() :
                 }
                 else -> {
                     val inputAttrsRaw = instance.editorInfo!!.inputType
+                    isComposable = inputAttrsRaw > 0
                     when (inputAttrsRaw and InputType.TYPE_MASK_CLASS) {
                         InputType.TYPE_CLASS_NUMBER,
                         InputType.TYPE_CLASS_PHONE,
@@ -216,7 +196,7 @@ class TextInputManager private constructor() :
                         InputType.TYPE_CLASS_TEXT -> {
                             when (inputAttrsRaw and InputType.TYPE_MASK_VARIATION) {
                                 InputType.TYPE_TEXT_VARIATION_SHORT_MESSAGE -> {
-                                    null.also { performEnterAsLineBreak = true }
+                                    null
                                 }
                                 InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                                 InputType.TYPE_TEXT_VARIATION_PASSWORD,
@@ -237,7 +217,7 @@ class TextInputManager private constructor() :
                         }
                         else -> {
                             if (inputAttrsRaw <= 0) return
-                            null.also { isComposable = inputAttrsRaw > 0 }
+                            null
                         }
                     }
                 }
@@ -281,8 +261,8 @@ class TextInputManager private constructor() :
                     trime.setCandidatesViewShown(isComposable && !value)
                 }
                 "_liquid_keyboard" -> trime.selectLiquidKeyboard(0)
-                "_hide_key_hint" -> if (mainKeyboardView != null) mainKeyboardView!!.setShowHint(!value)
-                "_hide_key_symbol" -> if (mainKeyboardView != null) mainKeyboardView!!.setShowSymbol(!value)
+                "_hide_key_hint" -> mainKeyboardView?.setShowHint(!value)
+                "_hide_key_symbol" -> mainKeyboardView?.setShowSymbol(!value)
                 else -> if (option.startsWith("_keyboard_") &&
                     option.length > 10 && value
                 ) {
@@ -294,14 +274,14 @@ class TextInputManager private constructor() :
                     val key = option.substring(5)
                     onEvent(Event(key))
                     shouldUpdateRimeOption = true
-                } else if (option.startsWith("_one_hand_mode")) {
-                    /*
+                } /*else if (option.startsWith("_one_hand_mode")) {
+                    *//*
                     val c = option[option.length - 1]
                     if (c == '1' && value) oneHandMode = 1 else if (c == '2' && value) oneHandMode =
                         2 else if (c == '3') oneHandMode = if (value) 1 else 2 else oneHandMode = 0
                     trime.loadBackground()
-                    trime.initKeyboard() */
-                }
+                    trime.initKeyboard() *//*
+                }*/
             }
             mainKeyboardView?.invalidateAllKeys()
         }
@@ -327,7 +307,8 @@ class TextInputManager private constructor() :
                 shouldUpdateRimeOption = false
             }
             // todo 释放按键可能不对
-            Rime.onKey(Event.getRimeEvent(keyEventCode, Rime.META_RELEASE_ON))
+            val event = Event.getRimeEvent(keyEventCode, Rime.META_RELEASE_ON)
+            Rime.processKey(event[0], event[1])
             activeEditorInstance.commitRimeText()
         }
         Timber.d("\t<TrimeInput>\tonRelease() finish")
@@ -389,7 +370,7 @@ class TextInputManager private constructor() :
                     arg = String.format(
                         arg,
                         activeEditorInstance.lastCommittedText,
-                        Rime.RimeGetInput(),
+                        Rime.getRimeRawInput() ?: "",
                         activeText,
                         activeText
                     )
@@ -410,7 +391,7 @@ class TextInputManager private constructor() :
             }
             KeyEvent.KEYCODE_VOICE_ASSIST -> Speech(trime).startListening() // Speech Recognition
             KeyEvent.KEYCODE_SETTINGS -> { // Settings
-                launch {
+                trime.lifecycleScope.launch {
                     when (event.option) {
                         "theme" -> trime.showDialogAboveInputView(
                             trime.themePicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
@@ -424,11 +405,11 @@ class TextInputManager private constructor() :
                         "sound" -> trime.showDialogAboveInputView(
                             trime.soundPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
                         )
-                        else -> trime.launchSettings()
+                        else -> ShortcutUtils.launchMainActivity(trime)
                     }
                 }
             }
-            KeyEvent.KEYCODE_PROG_RED -> launch {
+            KeyEvent.KEYCODE_PROG_RED -> trime.lifecycleScope.launch {
                 trime.showDialogAboveInputView(
                     trime.colorPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
                 )
@@ -461,7 +442,7 @@ class TextInputManager private constructor() :
     }
 
     override fun onKey(keyEventCode: Int, metaState: Int) {
-        printModifierKeyState(metaState, "keyEventCode=" + keyEventCode)
+        printModifierKeyState(metaState, "keyEventCode=$keyEventCode")
 
         // 优先由librime处理按键事件
         if (trime.handleKey(keyEventCode, metaState)) return
@@ -470,7 +451,7 @@ class TextInputManager private constructor() :
 
         // 如果没有修饰键，或者只有shift修饰键，针对非Android标准按键，可以直接commit字符
         if ((metaState == KeyEvent.META_SHIFT_ON || metaState == 0) && keyEventCode >= Keycode.A.ordinal) {
-            val text = Keycode.getSymbolLabell(Keycode.valueOf(keyEventCode))
+            val text = Keycode.getSymbolLabel(Keycode.valueOf(keyEventCode))
             if (text.length == 1) {
                 activeEditorInstance.commitText(text)
                 return
@@ -527,7 +508,7 @@ class TextInputManager private constructor() :
         onPress(0)
         if (!Rime.isComposing()) {
             if (index >= 0) {
-                Rime.toggleSwitchOption(index)
+                SchemaManager.toggleSwitchOption(index)
                 trime.updateComposing()
             }
         } else if (prefs.keyboard.hookCandidate || index > 9) {
@@ -569,29 +550,31 @@ class TextInputManager private constructor() :
                 inputMethodManager.showInputMethodPicker()
             }
             .setPositiveButton(R.string.set_ime) { dialog, _ ->
-                trime.launchSettings()
+                ShortcutUtils.launchMainActivity(trime)
                 dialog.dismiss()
             }
-        if (Rime.get_current_schema() == (".default")) {
+        if (Rime.getCurrentRimeSchema() == (".default")) {
             builder.setMessage(R.string.no_schemas)
         } else {
+            val schemaList = Rime.getRimeSchemaList()
+            val schemaNameList = schemaList.map(SchemaListItem::name).toTypedArray()
+            val schemaIdList = schemaList.map(SchemaListItem::schemaId).toTypedArray()
+            val currentSchema = Rime.getCurrentRimeSchema()
             builder
                 .setNegativeButton(
                     R.string.pref_select_schemas
                 ) { dialog, _ ->
-                    launch {
-                        trime.showDialogAboveInputView(
-                            trime.schemaPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
-                        )
-                    }
                     dialog.dismiss()
+                    trime.showDialogAboveInputView(trime.schemaPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert))
                 }
                 .setSingleChoiceItems(
-                    Rime.getSchemaNames(),
-                    Rime.getSchemaIndex()
+                    schemaNameList,
+                    schemaIdList.indexOf(currentSchema)
                 ) { dialog: DialogInterface, id: Int ->
                     dialog.dismiss()
-                    Rime.selectSchema(id)
+                    trime.lifecycleScope.launch {
+                        Rime.selectSchema(schemaIdList[id])
+                    }
                     shouldUpdateRimeOption = true
                 }
         }

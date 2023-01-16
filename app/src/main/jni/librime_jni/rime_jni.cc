@@ -12,6 +12,140 @@ static void declare_librime_module_dependencies() {
     rime_require_module_octagram();
 }
 
+class Rime {
+public:
+    Rime(): rime(rime_get_api()) {}
+    Rime(Rime const &) = delete;
+    void operator=(Rime const &) = delete;
+
+    static Rime &Instance() {
+        static Rime instance;
+        return instance;
+    }
+
+    bool isRunning() {
+        return session != 0;
+    }
+
+    void startup(bool fullCheck) {
+        if (!rime) return;
+        const char *userDir = getenv("RIME_USER_DATA_DIR");
+        const char *sharedDir = getenv("RIME_SHARED_DATA_DIR");
+
+        RIME_STRUCT(RimeTraits, trime_traits)
+        trime_traits.shared_data_dir = sharedDir;
+        trime_traits.user_data_dir = userDir;
+        trime_traits.app_name = "rime.trime";
+        trime_traits.distribution_name = "Rime";
+        trime_traits.distribution_code_name = "trime";
+        trime_traits.distribution_version = TRIME_VERSION;
+
+        if (firstRun) {
+            rime->setup(&trime_traits);
+            firstRun = false;
+        }
+        rime->initialize(&trime_traits);
+        rime->set_notification_handler([](void *context_object, RimeSessionId session_id,
+                                          const char *message_type, const char *message_value) {
+            auto env = GlobalRef->AttachEnv();
+            env->CallStaticVoidMethod(GlobalRef->Rime, GlobalRef->HandleRimeNotification,
+                                      *JString(env, message_type),
+                                      *JString(env, message_value));
+        }, GlobalRef->jvm);
+        if (rime->start_maintenance(fullCheck) && rime->is_maintenance_mode()) {
+            rime->join_maintenance_thread();
+        }
+
+        session = rime->create_session();
+        if (!session) {
+            return;
+        }
+    }
+
+    bool processKey(int keycode, int mask) {
+        return rime->process_key(session, keycode, mask);
+    }
+
+    bool simulateKeySequence(const std::string &sequence) {
+        return rime->simulate_key_sequence(session, sequence.data());
+    }
+
+    bool commitComposition() {
+        return rime->commit_composition(session);
+    }
+
+    void clearComposition() {
+        rime->clear_composition(session);
+    }
+
+    void setOption(const std::string &key, bool value) {
+        rime->set_option(session, key.c_str(), value);
+    }
+
+    bool getOption(const std::string &key) {
+        return rime->get_option(session, key.c_str());
+    }
+
+    std::string currentSchemaId() {
+        char result[MAX_BUFFER_LENGTH];
+        return rime->get_current_schema(session, result, MAX_BUFFER_LENGTH) ? result : "";
+    }
+
+    bool selectSchema(const std::string &schemaId) {
+        return rime->select_schema(session, schemaId.c_str());
+    }
+
+    std::string rawInput() {
+        return rime->get_input(session);
+    }
+
+    size_t caretPosition() {
+        return rime->get_caret_pos(session);
+    }
+
+    void setCaretPosition(size_t caretPos) {
+        rime->set_caret_pos(session, caretPos);
+    }
+
+    bool selectCandidateOnCurrentPage(size_t index) {
+        return rime->select_candidate_on_current_page(session, index);
+    }
+
+    bool deleteCandidateOnCurrentPage(size_t index) {
+        return rime->delete_candidate_on_current_page(session, index);
+    }
+
+    void deploy() {
+        rime->destroy_session(session);
+        session = 0;
+        rime->finalize();
+        startup(true);
+    }
+
+    bool sync() {
+        return rime->sync_user_data();
+    }
+
+    RimeSessionId sessionId() const {
+        return session;
+    }
+
+private:
+    RimeApi *rime;
+    RimeSessionId session = 0;
+
+    bool firstRun = true;
+};
+
+#define DO_IF_NOT_RUNNING(expr) \
+    if (!Rime::Instance().isRunning()) { \
+        expr; \
+    }
+#define RETURN_IF_NOT_RUNNING DO_IF_NOT_RUNNING(return)
+#define RETURN_VALUE_IF_NOT_RUNNING(v) DO_IF_NOT_RUNNING(return (v))
+
+GlobalRefSingleton *GlobalRef;
+
 JNIEXPORT jint JNICALL
 JNI_OnLoad(JavaVM* jvm, void* reserved)
 {
@@ -21,102 +155,34 @@ JNI_OnLoad(JavaVM* jvm, void* reserved)
 }
 
 static jobject rimeConfigValueToJObject(JNIEnv *env, RimeConfig* config, const std::string &key);
-static RimeSessionId activated_session_id = 0;
-static bool firstRun = true;
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_set_1notification_1handler(JNIEnv *env, jclass /* thiz */) { //TODO
-    auto handler = [](void *context_object, RimeSessionId session_id,
-                      const char *message_type, const char *message_value) {
-        if (activated_session_id == 0) return;
-        auto env = GlobalRef->AttachEnv();
-        env->CallStaticVoidMethod(GlobalRef->Rime, GlobalRef->HandleRimeNotification,
-                                  *JString(env, message_type),
-                                  *JString(env, message_value));
-    };
-    RimeSetNotificationHandler(handler, GlobalRef->jvm);
-}
-
-void init_traits(JNIEnv *env, jstring shared_data_dir, jstring user_data_dir, void (*func)(RimeTraits *)) {
-    RIME_STRUCT(RimeTraits, traits);
-    const char* p_shared_data_dir = shared_data_dir == nullptr ? nullptr : env->GetStringUTFChars(shared_data_dir, nullptr);
-    const char* p_user_data_dir = user_data_dir == nullptr ? nullptr : env->GetStringUTFChars(user_data_dir, nullptr);
-    traits.shared_data_dir = p_shared_data_dir;
-    traits.user_data_dir = p_user_data_dir;
-    traits.app_name = "rime.trime";
-    func(&traits);
-    env->ReleaseStringUTFChars(shared_data_dir, p_shared_data_dir);
-    env->ReleaseStringUTFChars(user_data_dir, p_user_data_dir);
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_setup(JNIEnv *env, jclass clazz, jstring shared_data_dir, jstring user_data_dir) {
-    if (firstRun) {
-        init_traits(env, shared_data_dir, user_data_dir, RimeSetup);
-        firstRun = false;
+Java_com_osfans_trime_core_Rime_startupRime(JNIEnv *env, jclass clazz, jstring shared_dir, jstring user_dir,
+                                            jboolean full_check) {
+    if (Rime::Instance().isRunning()) {
+        return;
     }
-}
 
-// entry and exit
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_initialize(JNIEnv *env, jclass /* thiz */, jstring shared_data_dir, jstring user_data_dir) {
-    init_traits(env, shared_data_dir, user_data_dir, RimeInitialize);
-}
+    // for rime shared data dir
+    setenv("RIME_SHARED_DATA_DIR", CString(env, shared_dir), 1);
+    // for rime user data dir
+    setenv("RIME_USER_DATA_DIR", CString(env, user_dir), 1);
 
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_finalize1(JNIEnv *env, jclass /* thiz */) {
-    ALOGI("finalize...");
-    RimeFinalize();
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_start_1maintenance(JNIEnv *env, jclass /* thiz */, jboolean full_check) {
-    return RimeStartMaintenance((Bool)full_check);
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_is_1maintenance_1mode(JNIEnv *env, jclass /* thiz */) {
-    return RimeIsMaintenancing();
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_join_1maintenance_1thread(JNIEnv *env, jclass /* thiz */) {
-    RimeJoinMaintenanceThread();
+    Rime::Instance().startup(full_check);
 }
 
 // deployment
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_deployer_1initialize(JNIEnv *env, jclass /* thiz */, jstring shared_data_dir, jstring user_data_dir) {
-    init_traits(env, shared_data_dir, user_data_dir, RimeDeployerInitialize);
+Java_com_osfans_trime_core_Rime_deployRime(JNIEnv *env, jclass /* thiz */) {
+    Rime::Instance().deploy();
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_prebuild(JNIEnv *env, jclass /* thiz */) {
-    return RimePrebuildAllSchemas();
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_deploy(JNIEnv *env, jclass /* thiz */) {
-    return RimeDeployWorkspace();
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_deploy_1schema(JNIEnv *env, jclass /* thiz */, jstring schema_file) {
-    const char* s = schema_file == nullptr ? nullptr : env->GetStringUTFChars(schema_file, nullptr);
-    bool b = RimeDeploySchema(s);
-    env->ReleaseStringUTFChars(schema_file, s);
-    return b;
+Java_com_osfans_trime_core_Rime_deployRimeSchemaFile(JNIEnv *env, jclass /* thiz */, jstring schema_file) {
+    return rime_get_api()->deploy_schema(CString(env, schema_file));
 }
 
 extern "C"
@@ -127,155 +193,116 @@ Java_com_osfans_trime_core_Rime_deployRimeConfigFile(JNIEnv *env, jclass /* thiz
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_sync_1user_1data(JNIEnv *env, jclass /* thiz */) {
-    ALOGI("sync user data...");
-    return RimeSyncUserData();
-}
-
-// session management
-extern "C"
-JNIEXPORT jint JNICALL
-Java_com_osfans_trime_core_Rime_create_1session(JNIEnv *env, jclass /* thiz */) {
-    activated_session_id = RimeCreateSession();
-    return activated_session_id;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_find_1session(JNIEnv *env, jclass /* thiz */) {
-    return RimeFindSession((RimeSessionId)activated_session_id);
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_destroy_1session(JNIEnv *env, jclass /* thiz */) {
-    bool ret = RimeDestroySession((RimeSessionId)activated_session_id);
-    activated_session_id = 0;
-    return ret;
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_cleanup_1stale_1sessions(JNIEnv *env, jclass /* thiz */) {
-    RimeCleanupStaleSessions();
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_cleanup_1all_1sessions(JNIEnv *env, jclass /* thiz */) {
-    RimeCleanupAllSessions();
+Java_com_osfans_trime_core_Rime_syncRimeUserData(JNIEnv *env, jclass /* thiz */) {
+    return Rime::Instance().sync();
 }
 
 // input
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_process_1key(JNIEnv *env, jclass /* thiz */, jint keycode, jint mask) {
-    return RimeProcessKey((RimeSessionId)activated_session_id, keycode, mask);
+Java_com_osfans_trime_core_Rime_processRimeKey(JNIEnv *env, jclass /* thiz */, jint keycode, jint mask) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    return Rime::Instance().processKey(keycode, mask);
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_commit_1composition(JNIEnv *env, jclass /* thiz */) {
-    return RimeCommitComposition((RimeSessionId)activated_session_id);
+Java_com_osfans_trime_core_Rime_commitRimeComposition(JNIEnv *env, jclass /* thiz */) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    return Rime::Instance().commitComposition();
 }
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_clear_1composition(JNIEnv *env, jclass /* thiz */) {
-    RimeClearComposition((RimeSessionId)activated_session_id);
+Java_com_osfans_trime_core_Rime_clearRimeComposition(JNIEnv *env, jclass /* thiz */) {
+    RETURN_IF_NOT_RUNNING
+    Rime::Instance().clearComposition();
 }
 
 void rimeCommitToJObject(JNIEnv *env, const RimeCommit &commit, const jobject &jcommit) {
-    env->SetIntField(jcommit, GlobalRef->RimeCommitDataSize, commit.data_size);
     env->SetObjectField(jcommit, GlobalRef->RimeCommitText, JString(env, commit.text));
 }
 
 // output
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_get_1commit(JNIEnv *env, jclass /* thiz */, jobject jcommit) {
-    RIME_STRUCT(RimeCommit, commit);
-    Bool r = RimeGetCommit((RimeSessionId)activated_session_id, &commit);
-    if (r) {
+Java_com_osfans_trime_core_Rime_getRimeCommit(JNIEnv *env, jclass /* thiz */, jobject jcommit) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    RIME_STRUCT(RimeCommit, commit)
+    auto rime = rime_get_api();
+    if (rime->get_commit(Rime::Instance().sessionId(), &commit)) {
         rimeCommitToJObject(env, commit, jcommit);
-        RimeFreeCommit(&commit);
+        rime->free_commit(&commit);
+        return true;
     }
-    return r;
+    return false;
 }
 
 void rimeContextToJObject(JNIEnv *env, const RimeContext &context, const jobject &jcontext) {
-    env->SetIntField(jcontext, GlobalRef->RimeContextDataSize, context.data_size);
-    {
-        auto composition = env->AllocObject(GlobalRef->RimeComposition);
-        env->SetIntField(composition, GlobalRef->RimeCompositionLength, context.composition.length);
-        env->SetIntField(composition, GlobalRef->RimeCompositionCursorPos,
+    auto composition = JRef<>(env, env->AllocObject(GlobalRef->RimeComposition));
+    env->SetIntField(composition, GlobalRef->RimeCompositionLength, context.composition.length);
+    env->SetIntField(composition, GlobalRef->RimeCompositionCursorPos,
                          context.composition.cursor_pos);
-        env->SetIntField(composition, GlobalRef->RimeCompositionSelStart,
+    env->SetIntField(composition, GlobalRef->RimeCompositionSelStart,
                          context.composition.sel_start);
-        env->SetIntField(composition, GlobalRef->RimeCompositionSelEnd,
+    env->SetIntField(composition, GlobalRef->RimeCompositionSelEnd,
                          context.composition.sel_end);
-        env->SetObjectField(composition, GlobalRef->RimeCompositionPreedit,
+    env->SetObjectField(composition, GlobalRef->RimeCompositionPreedit,
                             JString(env, context.composition.preedit));
-        env->SetObjectField(jcontext, GlobalRef->RimeContextComposition, composition);
-    }
-    {
-        auto menu = env->AllocObject(GlobalRef->RimeMenu);
-        env->SetIntField(menu, GlobalRef->RimeMenuPageSize, context.menu.page_size);
-        env->SetIntField(menu, GlobalRef->RimeMenuPageNo, context.menu.page_no);
-        env->SetBooleanField(menu, GlobalRef->RimeMenuIsLastPage, context.menu.is_last_page);
-        env->SetIntField(menu, GlobalRef->RimeMenuHighlightedCandidateIndex,
-                         context.menu.highlighted_candidate_index);
-        env->SetIntField(menu, GlobalRef->RimeMenuNumCandidates, context.menu.num_candidates);
-        {
-            int num = context.menu.num_candidates;
-            auto candidates = env->NewObjectArray(num, GlobalRef->RimeCandidate, nullptr);
-            for (int i = 0; i < num; ++i) {
-                auto candidate = env->AllocObject(GlobalRef->RimeCandidate);
-                env->SetObjectField(candidate, GlobalRef->RimeCandidateText,
-                                    JString(env, context.menu.candidates[i].text));
-                env->SetObjectField(candidate, GlobalRef->RimeCandidateComment,
-                                    JString(env, context.menu.candidates[i].comment));
-                env->SetObjectArrayElement(candidates, i, candidate);
-                env->DeleteLocalRef(candidate);
-            }
-            env->SetObjectField(menu, GlobalRef->RimeMenuCandidates, candidates);
-        }
-            env->SetObjectField(menu, GlobalRef->RimeMenuSelectKeys,
-                                JString(env, context.menu.select_keys));
-            env->SetObjectField(jcontext, GlobalRef->RimeContextMenu, menu);
-    }
-    env->SetObjectField(jcontext, GlobalRef->RimeContextCommitTextPreview, JString(env, context.commit_text_preview));
+    env->SetObjectField(jcontext, GlobalRef->RimeContextComposition, composition);
 
-    {
-        if (RIME_STRUCT_HAS_MEMBER(context, context.select_labels)
-            && context.select_labels) {
-            int pageSize = context.menu.page_size;
-            auto selectLabels = env->NewObjectArray(pageSize, GlobalRef->String, nullptr);
-            for (int i = 0; i < pageSize; ++i) {
-                env->SetObjectArrayElement(selectLabels, i,
-                                           JString(env, context.select_labels[i]));
-            }
-            env->SetObjectField(jcontext, GlobalRef->RimeContextSelectLabels, selectLabels);
+    const auto &menu = context.menu;
+    auto jmenu = JRef<>(env, env->AllocObject(GlobalRef->RimeMenu));
+    env->SetIntField(jmenu, GlobalRef->RimeMenuPageSize, menu.page_size);
+    env->SetIntField(jmenu, GlobalRef->RimeMenuPageNo, menu.page_no);
+    env->SetBooleanField(jmenu, GlobalRef->RimeMenuIsLastPage, menu.is_last_page);
+    env->SetIntField(jmenu, GlobalRef->RimeMenuHighlightedCandidateIndex,
+                     menu.highlighted_candidate_index);
+    env->SetIntField(jmenu, GlobalRef->RimeMenuNumCandidates, context.menu.num_candidates);
+
+    size_t numSelectKeys = menu.select_keys ? std::strlen(menu.select_keys) : 0;
+    bool hasLabel = RIME_STRUCT_HAS_MEMBER(context, context.select_labels) && context.select_labels;
+    auto selectLabels = JRef<jobjectArray>(env, env->NewObjectArray(menu.num_candidates, GlobalRef->String, nullptr));
+    auto candidates = JRef<jobjectArray>(env, env->NewObjectArray(menu.num_candidates, GlobalRef->CandidateListItem, nullptr));
+    for (int i = 0; i < menu.num_candidates; ++i) {
+        std::string label;
+        if (i < menu.page_size && hasLabel) {
+            label = context.select_labels[i];
+        } else if (i < numSelectKeys) {
+            label = std::string(1, menu.select_keys[i]);
         } else {
-            env->SetObjectField(jcontext, GlobalRef->RimeContextSelectLabels, nullptr);
+            label = std::to_string((i + 1) % 10);
         }
+        label.append(" ");
+        env->SetObjectArrayElement(selectLabels, i, JString(env, label));
+        auto &candidate = context.menu.candidates[i];
+        auto jcandidate = JRef<>(env, env->NewObject(GlobalRef->CandidateListItem, GlobalRef->CandidateListItemInit,
+                                                     *JString(env, candidate.comment ? candidate.comment : ""),
+                                                     *JString(env, candidate.text ? candidate.text : "")));
+        env->SetObjectArrayElement(candidates, i, jcandidate);
     }
+    env->SetObjectField(jmenu, GlobalRef->RimeMenuCandidates, candidates);
+
+    env->SetObjectField(jcontext, GlobalRef->RimeContextMenu, jmenu);
+    env->SetObjectField(jcontext, GlobalRef->RimeContextCommitTextPreview, JString(env, context.commit_text_preview));
+    env->SetObjectField(jcontext, GlobalRef->RimeContextSelectLabels, selectLabels);
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_get_1context(JNIEnv *env, jclass /* thiz */, jobject jcontext) {
-    RIME_STRUCT(RimeContext, context);
-    Bool r = RimeGetContext(activated_session_id, &context);
-    if (r) {
+Java_com_osfans_trime_core_Rime_getRimeContext(JNIEnv *env, jclass /* thiz */, jobject jcontext) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    RIME_STRUCT(RimeContext, context)
+    auto rime = rime_get_api();
+    if (rime->get_context(Rime::Instance().sessionId(), &context)) {
         rimeContextToJObject(env, context, jcontext);
-        RimeFreeContext(&context);
+        rime->free_context(&context);
+        return true;
     }
-    return r;
+    return false;
 }
 
 void rimeStatusToJObject(JNIEnv *env, const RimeStatus &status, const jobject &jstatus) {
-    env->SetIntField(jstatus, GlobalRef->RimeStatusDataSize, status.data_size);
     env->SetObjectField(jstatus, GlobalRef->RimeStatusSchemaId, JString(env, status.schema_id));
     env->SetObjectField(jstatus, GlobalRef->RimeStatusSchemaName, JString(env, status.schema_name));
     env->SetBooleanField(jstatus, GlobalRef->RimeStatusDisable, status.is_disabled);
@@ -289,14 +316,17 @@ void rimeStatusToJObject(JNIEnv *env, const RimeStatus &status, const jobject &j
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_get_1status(JNIEnv *env, jclass /* thiz */, jobject jstatus) {
-    RIME_STRUCT(RimeStatus, status);
-    Bool r = RimeGetStatus(activated_session_id, &status);
-    if (r) {
+Java_com_osfans_trime_core_Rime_getRimeStatus(JNIEnv *env, jclass /* thiz */, jobject jstatus) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    RIME_STRUCT(RimeStatus, status)
+    auto rime = rime_get_api();
+    Bool r = RimeGetStatus(Rime::Instance().sessionId(), &status);
+    if (rime->get_status(Rime::Instance().sessionId(), &status)) {
         rimeStatusToJObject(env, status, jstatus);
-        RimeFreeStatus(&status);
+        rime->free_status(&status);
+        return true;
     }
-    return r;
+    return false;
 }
 
 static bool is_save_option(const char* p) {
@@ -324,326 +354,121 @@ static bool is_save_option(const char* p) {
 // runtime options
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_set_1option(JNIEnv *env, jclass /* thiz */, jstring option, jboolean value) {
-    const char* s = option == nullptr ? nullptr : env->GetStringUTFChars(option, nullptr);
-    std::string option_name(s);
-    RimeConfig config = {nullptr};
+Java_com_osfans_trime_core_Rime_setRimeOption(JNIEnv *env, jclass /* thiz */, jstring option, jboolean value) {
+    RETURN_IF_NOT_RUNNING
+    auto rime = rime_get_api();
+    RimeConfig user = {nullptr};
+    auto opt = CString(env, option);
     bool b;
-    if (is_save_option(s)) {
-        b = RimeUserConfigOpen("user", &config);
-        if (b) {
-            std::string str("var/option/");
-            str += option_name;
-            b = RimeConfigSetBool(&config, str.c_str(), value);
+    if (is_save_option(opt)) {
+        if (rime->user_config_open("user", &user)) {
+            std::string key = "var/option/" + std::string (opt);
+            rime->config_set_bool(&user, key.c_str(), value);
+            rime->config_close(&user);
         }
-        RimeConfigClose(&config);
     }
-    RimeSetOption(activated_session_id, s, value);
-    env->ReleaseStringUTFChars(option, s);
+    Rime::Instance().setOption(opt, value);
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_get_1option(JNIEnv *env, jclass /* thiz */, jstring option) {
-    const char* s = option == nullptr ? nullptr : env->GetStringUTFChars(option, nullptr);
-    bool value = RimeGetOption(activated_session_id, s);
-    env->ReleaseStringUTFChars(option, s);
-    return value;
+Java_com_osfans_trime_core_Rime_getRimeOption(JNIEnv *env, jclass /* thiz */, jstring option) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    return Rime::Instance().getOption(CString(env, option));
+}
+
+jobjectArray rimeSchemaListToJObjectArray(JNIEnv *env, RimeSchemaList &list) {
+    jobjectArray array = env->NewObjectArray(static_cast<int>(list.size), GlobalRef->SchemaListItem,
+                                             nullptr);
+    for (int i = 0; i < list.size; i++) {
+        auto item = list.list[i];
+        auto obj = JRef<>(env, env->NewObject(GlobalRef->SchemaListItem, GlobalRef->SchemaListItemInit,
+                                              *JString(env, item.schema_id),
+                                              *JString(env, item.name)));
+        env->SetObjectArrayElement(array, i, obj);
+    }
+    return array;
 }
 
 extern "C"
-JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_set_1property(JNIEnv *env, jclass /* thiz */, jstring prop, jstring value) {
-    const char* s = prop == nullptr ? nullptr : env->GetStringUTFChars(prop, nullptr);
-    const char* v = value == nullptr ? nullptr : env->GetStringUTFChars(value, nullptr);
-    RimeSetProperty(activated_session_id, s, v);
-    env->ReleaseStringUTFChars(prop, s);
-    env->ReleaseStringUTFChars(value, v);
+JNIEXPORT jobjectArray JNICALL
+Java_com_osfans_trime_core_Rime_getRimeSchemaList(JNIEnv *env, jclass /* thiz */) {
+    auto rime = rime_get_api();
+    RimeSchemaList list = {0};
+    rime->get_schema_list(&list);
+    auto array = rimeSchemaListToJObjectArray(env, list);
+    rime->free_schema_list(&list);
+    return array;
 }
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1property(JNIEnv *env, jclass /* thiz */, jstring prop) {
-    const char* s = prop == nullptr ? nullptr : env->GetStringUTFChars(prop, nullptr);
-    char value[BUFSIZE] = {0};
-    bool b = RimeGetProperty(activated_session_id, s, value, BUFSIZE);
-    env->ReleaseStringUTFChars(prop, s);
-    return b ? env->NewStringUTF(value) : nullptr;
-}
-
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_get_1schema_1list(JNIEnv *env, jclass /* thiz */) {
-    RimeSchemaList list;
-    jobject jobj = nullptr;
-    if (RimeGetSchemaList(&list)) jobj = rimeSchemaListToJObject(env, &list);
-    RimeFreeSchemaList(&list);
-    return jobj;
-}
-
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1current_1schema(JNIEnv *env, jclass /* thiz */) {
-    char current[BUFSIZE] = {0};
-    bool b = RimeGetCurrentSchema(activated_session_id, current, sizeof(current));
-    if (b) return env->NewStringUTF(current);
-    return env->NewStringUTF("");
+Java_com_osfans_trime_core_Rime_getCurrentRimeSchema(JNIEnv *env, jclass /* thiz */) {
+    RETURN_VALUE_IF_NOT_RUNNING(env->NewStringUTF(""))
+    return env->NewStringUTF(Rime::Instance().currentSchemaId().c_str());
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_select_1schema(JNIEnv *env, jclass /* thiz */, jstring schema_id) {
-    const char* s = schema_id == nullptr ? nullptr : env->GetStringUTFChars(schema_id, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeUserConfigOpen("user", &config);
-    if (b) {
-        b = RimeConfigSetString(&config, "var/previously_selected_schema", s);
-        std::string str(s);
-        str = "var/schema_access_time/" + str;
-        b = RimeConfigSetInt(&config, str.c_str(), time(nullptr));
+Java_com_osfans_trime_core_Rime_selectRimeSchema(JNIEnv *env, jclass /* thiz */, jstring schema_id) {
+    auto rime = rime_get_api();
+    RimeConfig user = {nullptr};
+    auto schema = CString(env, schema_id);
+    if (rime->user_config_open("user", &user)) {
+        rime->config_set_string(&user, "var/previously_selected_schema", schema);
+        std::string key = "var/schema_access_time/" + std::string (schema);
+        rime->config_set_int(&user, key.c_str(), time(nullptr));
+        rime->config_close(&user);
     }
-    RimeConfigClose(&config);
-    bool value = RimeSelectSchema(activated_session_id, s);
-    env->ReleaseStringUTFChars(schema_id, s);
-    return value;
-}
-
-// configuration
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_config_1get_1bool(JNIEnv *env, jclass /* thiz */, jstring name, jstring key) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {0};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    Bool value;
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigGetBool(&config, s, &value);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    if (!b) return nullptr;
-    jclass jc = env->FindClass("java/lang/Boolean");
-    jmethodID ctorID = env->GetMethodID(jc, "<init>", "(Z)V");
-    auto ret = env->NewObject(jc, ctorID, value);
-    env->DeleteLocalRef(jc);
-    return ret;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_config_1set_1bool(JNIEnv *env, jclass /* thiz */, jstring name, jstring key, jboolean value) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigSetBool(&config, s, value);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    return b;
-}
-
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_config_1get_1int(JNIEnv *env, jclass /* thiz */, jstring name, jstring key) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    int value;
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigGetInt(&config, s, &value);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    if (!b) return nullptr;
-    jclass jc = env->FindClass("java/lang/Integer");
-    jmethodID ctorID = env->GetMethodID(jc, "<init>", "(I)V");
-    auto ret = env->NewObject(jc, ctorID, value);
-    env->DeleteLocalRef(jc);
-    return ret;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_config_1set_1int(JNIEnv *env, jclass /* thiz */, jstring name, jstring key, jint value) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigSetInt(&config, s, value);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    return b;
-}
-
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_config_1get_1double(JNIEnv *env, jclass /* thiz */, jstring name, jstring key) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    double value;
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigGetDouble(&config, s, &value);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    if (!b) return nullptr;
-    jclass jc = env->FindClass("java/lang/Double");
-    jmethodID ctorID = env->GetMethodID(jc, "<init>", "(D)V");
-    auto ret = env->NewObject(jc, ctorID, value);
-    env->DeleteLocalRef(jc);
-    return ret;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_config_1set_1double(JNIEnv *env, jclass /* thiz */, jstring name, jstring key, jdouble value) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {0};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigSetDouble(&config, s, value);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    return b;
-}
-
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_config_1get_1string(JNIEnv *env, jclass /* thiz */, jstring name, jstring key) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    char value[BUFSIZE] = {0};
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        b = RimeConfigGetString(&config, s, value, BUFSIZE);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    return b ? env->NewStringUTF(value) : nullptr;
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_config_1set_1string(JNIEnv *env, jclass /* thiz */, jstring name, jstring key, jstring value) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        const char* v = env->GetStringUTFChars(value, nullptr);
-        b = RimeConfigSetString(&config, s, v);
-        env->ReleaseStringUTFChars(key, s);
-        env->ReleaseStringUTFChars(key, v);
-    }
-    RimeConfigClose(&config);
-    return b;
-}
-
-extern "C"
-JNIEXPORT jint JNICALL
-Java_com_osfans_trime_core_Rime_config_1list_1size(JNIEnv *env, jclass /* thiz */, jstring name, jstring key) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    int value = 0;
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        value = RimeConfigListSize(&config, s);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    return value;
+    return Rime::Instance().selectSchema(schema);
 }
 
 //testing
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_simulate_1key_1sequence(JNIEnv *env, jclass /* thiz */, jstring key_sequence) {
-    const char* str = key_sequence == nullptr ? nullptr : env->GetStringUTFChars(key_sequence, nullptr);
-    if (str == nullptr) return false; /* OutOfMemoryError already thrown */
-    jboolean r = RimeSimulateKeySequence((RimeSessionId)activated_session_id, str);
-    env->ReleaseStringUTFChars(key_sequence, str);
-    return r;
+Java_com_osfans_trime_core_Rime_simulateKeySequence(JNIEnv *env, jclass /* thiz */, jstring key_sequence) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    return Rime::Instance().simulateKeySequence(CString(env, key_sequence));
 }
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1input(JNIEnv *env, jclass /* thiz */) {
-    const char* c = rime_get_api()->get_input(activated_session_id);
-    return env->NewStringUTF(c);
+Java_com_osfans_trime_core_Rime_getRimeRawInput(JNIEnv *env, jclass /* thiz */) {
+    RETURN_VALUE_IF_NOT_RUNNING(env->NewStringUTF(""))
+    return env->NewStringUTF(Rime::Instance().rawInput().data());
 }
 
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_osfans_trime_core_Rime_get_1caret_1pos(JNIEnv *env, jclass /* thiz */) {
-    return rime_get_api()->get_caret_pos(activated_session_id);
+Java_com_osfans_trime_core_Rime_getRimeCaretPos(JNIEnv *env, jclass /* thiz */) {
+    RETURN_VALUE_IF_NOT_RUNNING(-1)
+    return static_cast<jint>(Rime::Instance().caretPosition());
 }
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_osfans_trime_core_Rime_set_1caret_1pos(JNIEnv *env, jclass /* thiz */, jint caret_pos) {
-    return rime_get_api()->set_caret_pos(activated_session_id, caret_pos);
+Java_com_osfans_trime_core_Rime_setRimeCaretPos(JNIEnv *env, jclass /* thiz */, jint caret_pos) {
+    RETURN_IF_NOT_RUNNING
+    Rime::Instance().setCaretPosition(caret_pos);
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_select_1candidate(JNIEnv *env, jclass /* thiz */, jint index) {
-    return rime_get_api()->select_candidate(activated_session_id, index);
+Java_com_osfans_trime_core_Rime_selectRimeCandidateOnCurrentPage(JNIEnv *env, jclass /* thiz */, jint index) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    return Rime::Instance().selectCandidateOnCurrentPage(index);
 }
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_select_1candidate_1on_1current_1page(JNIEnv *env, jclass /* thiz */, jint index) {
-    return rime_get_api()->select_candidate_on_current_page(activated_session_id, index);
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_delete_1candidate(JNIEnv *env, jclass /* thiz */, jint index) {
-    return rime_get_api()->delete_candidate(activated_session_id, index);
-}
-
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_delete_1candidate_1on_1current_1page(JNIEnv *env, jclass /* thiz */, jint index) {
-    return rime_get_api()->delete_candidate_on_current_page(activated_session_id, index);
+Java_com_osfans_trime_core_Rime_deleteRimeCandidateOnCurrentPage(JNIEnv *env, jclass /* thiz */, jint index) {
+    RETURN_VALUE_IF_NOT_RUNNING(false)
+    return Rime::Instance().deleteCandidateOnCurrentPage(index);
 }
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1version(JNIEnv *env, jclass /* thiz */) {
-    return env->NewStringUTF(rime_get_api()->get_version());
-}
-
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1trime_1version(JNIEnv *env, jclass /* thiz */) {
-    return env->NewStringUTF(TRIME_VERSION);
-}
-
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1librime_1version(JNIEnv *env, jclass /* thiz */) {
+Java_com_osfans_trime_core_Rime_getLibrimeVersion(JNIEnv *env, jclass /* thiz */) {
     return env->NewStringUTF(LIBRIME_VERSION);
 }
 
@@ -660,23 +485,6 @@ static jobject rimeConfigListToJObject(JNIEnv *env, RimeConfig* config, const st
     }
     rime->config_end(&iter);
     return obj;
-}
-
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_config_1get_1list(JNIEnv *env, jclass /* thiz */, jstring name, jstring key) {
-    const char* s = env->GetStringUTFChars(name, nullptr);
-    RimeConfig config = {nullptr};
-    Bool b = RimeConfigOpen(s, &config);
-    env->ReleaseStringUTFChars(name, s);
-    jobject value = nullptr;
-    if (b) {
-        s = env->GetStringUTFChars(key, nullptr);
-        value = rimeConfigListToJObject(env, &config, s);
-        env->ReleaseStringUTFChars(key, s);
-    }
-    RimeConfigClose(&config);
-    return value;
 }
 
 static jobject rimeConfigMapToJObject(JNIEnv *env, RimeConfig *config, const std::string &key) {
@@ -720,34 +528,8 @@ jobject rimeConfigValueToJObject(JNIEnv *env, RimeConfig *config, const std::str
 }
 
 extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_getRimeConfigValue(JNIEnv *env, jclass clazz, jstring config_id, jstring key) {
-    auto rime = rime_get_api();
-    RimeConfig config = {nullptr};
-    jobject obj = nullptr;
-    if (rime->config_open(CString(env, config_id), &config)) {
-        obj = rimeConfigValueToJObject(env, &config, CString(env, key));
-        rime->config_close(&config);
-    }
-    return obj;
-}
-
-extern "C"
-JNIEXPORT jobject JNICALL
-Java_com_osfans_trime_core_Rime_getRimeSchemaValue(JNIEnv *env, jclass clazz, jstring schema_id, jstring key) {
-    auto rime = rime_get_api();
-    RimeConfig config = {nullptr};
-    jobject obj = nullptr;
-    if (rime->schema_open(CString(env, schema_id), &config)) {
-        obj = rimeConfigValueToJObject(env, &config, CString(env, key));
-        rime->config_close(&config);
-    }
-    return obj;
-}
-
-extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_osfans_trime_core_Rime_run_1task(JNIEnv *env, jclass /* thiz */, jstring task_name) {
+Java_com_osfans_trime_core_Rime_runRimeTask(JNIEnv *env, jclass /* thiz */, jstring task_name) {
     const char* s = env->GetStringUTFChars(task_name, nullptr);
     RimeConfig config = {nullptr};
     Bool b = RimeRunTask(s);
@@ -756,7 +538,7 @@ Java_com_osfans_trime_core_Rime_run_1task(JNIEnv *env, jclass /* thiz */, jstrin
 }
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1shared_1data_1dir(JNIEnv *env, jclass /* thiz */) {
+Java_com_osfans_trime_core_Rime_getRimeSharedDataDir(JNIEnv *env, jclass /* thiz */) {
     return env->NewStringUTF(RimeGetSharedDataDir());
 }
 
@@ -768,12 +550,12 @@ Java_com_osfans_trime_core_Rime_getRimeUserDataDir(JNIEnv *env, jclass /* thiz *
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1sync_1dir(JNIEnv *env, jclass /* thiz */) {
+Java_com_osfans_trime_core_Rime_getRimeSyncDir(JNIEnv *env, jclass /* thiz */) {
     return env->NewStringUTF(RimeGetSyncDir());
 }
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_osfans_trime_core_Rime_get_1user_1id(JNIEnv *env, jclass /* thiz */) {
+Java_com_osfans_trime_core_Rime_getRimeUserId(JNIEnv *env, jclass /* thiz */) {
     return env->NewStringUTF(RimeGetUserId());
 }

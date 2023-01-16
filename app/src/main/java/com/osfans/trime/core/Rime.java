@@ -18,27 +18,14 @@
 
 package com.osfans.trime.core;
 
-import android.content.Context;
-import android.text.TextUtils;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.osfans.trime.data.AppPrefs;
 import com.osfans.trime.data.DataManager;
 import com.osfans.trime.data.opencc.OpenCCDictManager;
-import com.osfans.trime.ime.symbol.SimpleKeyBean;
-import java.io.BufferedReader;
-import java.io.CharArrayWriter;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
+import com.osfans.trime.data.schema.SchemaManager;
 import java.util.Map;
-import kotlin.collections.CollectionsKt;
-import kotlin.collections.IndexedValue;
+import kotlin.Pair;
 import kotlinx.coroutines.channels.BufferOverflow;
 import kotlinx.coroutines.flow.FlowKt;
 import kotlinx.coroutines.flow.MutableSharedFlow;
@@ -53,8 +40,6 @@ import timber.log.Timber;
  *     href="https://github.com/BYVoid/OpenCC">OpenCC</a>
  */
 public class Rime {
-  private static Map<String, Object> mSymbols;
-
   public final SharedFlow<RimeEvent> rimeNotiFlow = FlowKt.asSharedFlow(rimeNotiFlow_);
 
   /** Rime編碼區 */
@@ -83,28 +68,14 @@ public class Rime {
     }
   }
 
-  /** Rime候選項 */
-  public static class RimeCandidate {
-    public String text;
-    public String comment;
-
-    public RimeCandidate(String text, String comment) {
-      this.text = text;
-      this.comment = comment;
-    }
-
-    public RimeCandidate() {}
-  }
-
-  /** Rime候選區，包含多個{@link RimeCandidate 候選項} */
+  /** Rime候選區，包含多個{@link CandidateListItem 候選項} */
   public static class RimeMenu {
     int page_size;
     int page_no;
     boolean is_last_page;
     int highlighted_candidate_index;
     int num_candidates;
-    RimeCandidate[] candidates;
-    String select_keys;
+    CandidateListItem[] candidates;
   }
 
   /** Rime上屏的字符串 */
@@ -116,7 +87,6 @@ public class Rime {
 
   /** Rime環境，包括 {@link RimeComposition 編碼區} 、{@link RimeMenu 候選區} */
   public static class RimeContext {
-    int data_size;
     // v0.9
     RimeComposition composition;
     RimeMenu menu;
@@ -124,20 +94,15 @@ public class Rime {
     String commit_text_preview;
     String[] select_labels;
 
-    public int size() {
-      if (menu == null) return 0;
-      return menu.num_candidates;
-    }
-
-    public RimeCandidate[] getCandidates() {
-      Timber.d("setWindow getCandidates() size()=" + size());
-      return size() == 0 ? null : menu.candidates;
+    public CandidateListItem[] getCandidates() {
+      int numCandidates = menu != null ? menu.num_candidates : 0;
+      Timber.d("setWindow getCandidates() numCandidates=%s", numCandidates);
+      return numCandidates != 0 ? menu.candidates : new CandidateListItem[0];
     }
   }
 
   /** Rime狀態 */
   public static class RimeStatus {
-    int data_size;
     // v0.9
     String schema_id;
     String schema_name;
@@ -150,108 +115,11 @@ public class Rime {
     boolean is_ascii_punct;
   }
 
-  /** Rime方案 */
-  @SuppressWarnings("unchecked")
-  public static class RimeSchema {
-    private List<Map<String, Object>> switches;
-    public Map<String, Object> symbolMap;
-
-    public RimeSchema(@NonNull String schemaId) {
-      Timber.d("RimeSchema <init>, schemaId=%s", schemaId);
-      if ((switches = (List<Map<String, Object>>) getRimeSchemaValue(schemaId, "switches"))
-          == null) {
-        Timber.w("Failed to parse schema status switches, fallback to empty collection");
-        switches = new ArrayList<>();
-      }
-      // 剔除没有 states 条目项的值，它们不作为开关使用
-      if (!switches.isEmpty()) {
-        for (final Iterator<Map<String, Object>> it = switches.iterator(); it.hasNext(); ) {
-          final Map<String, Object> s = it.next();
-          if (!s.containsKey("states")) it.remove();
-        }
-      }
-      final Map<String, Object> menu;
-      if ((menu = (Map<String, Object>) getRimeSchemaValue(schemaId, "menu")) != null) {
-        Timber.d("The menu field of this schema is set, page_size=%s", menu.get("page_size"));
-      }
-
-      // FIXME: 取回的key正常，value为null，导致symbolMap无法正常使用
-      if ((symbolMap = (Map<String, Object>) getRimeSchemaValue(schemaId, "punctuator/symbols"))
-          == null) {
-        symbolMap = new HashMap<>();
-      }
-    }
-
-    public RimeCandidate[] getStatusSwitches() {
-      if (switches.isEmpty()) return new RimeCandidate[0];
-      final RimeCandidate[] candidates = new RimeCandidate[switches.size()];
-      int i = 0;
-      for (final Map<String, Object> s : switches) {
-        candidates[i] = new RimeCandidate();
-        final List<String> states = (List<String>) s.get("states");
-        int enabled = s.get("enabled") != null ? (int) s.get("enabled") : 0;
-        assert states != null;
-        final String text = states.get(enabled);
-
-        boolean showSwitchArrow = getAppPrefs().getKeyboard().getSwitchArrowEnabled();
-        final String comment =
-            s.containsKey("options")
-                ? ""
-                : showSwitchArrow ? "→ " + states.get(1 - enabled) : states.get(1 - enabled);
-        candidates[i] = new RimeCandidate(text, comment);
-        i++;
-      }
-      return candidates;
-    }
-
-    public void updateSwitchOptions() {
-      if (switches.isEmpty()) return; // 無方案
-      for (final IndexedValue<Map<String, Object>> is : CollectionsKt.withIndex(switches)) {
-        final Map<String, Object> s = is.getValue();
-        if (s.containsKey("options")) { // 带有一系列 Rime 运行时选项的开关，找到启用的选项并标记
-          final List<String> options = (List<String>) s.get("options");
-          assert options != null;
-          for (final IndexedValue<String> io : CollectionsKt.withIndex(options)) {
-            if (Rime.get_option(io.getValue())) {
-              // 将启用状态标记为此选项的索引值，方便切换时直接从选项列表中获取
-              s.put("enabled", io.getIndex());
-              break;
-            }
-          }
-        } else { // 只有单 Rime 运行时选项的开关，开关名即选项名，标记其启用状态
-          s.put("enabled", Rime.get_option((String) s.get("name")) ? 1 : 0);
-        }
-        switches.set(is.getIndex(), s);
-      }
-    }
-
-    public void toggleSwitchOption(int index) {
-      if (switches.isEmpty()) return;
-      final Map<String, Object> s = switches.get(index);
-      int enabled = s.get("enabled") != null ? (int) s.get("enabled") : 0;
-      int nextOrReserved;
-      if (s.containsKey("options")) {
-        final List<String> options = (List<String>) s.get("options");
-        assert options != null;
-        Rime.setOption(options.get(enabled), false);
-        nextOrReserved = (enabled + 1) % options.size();
-        Rime.setOption(options.get(nextOrReserved), true);
-      } else {
-        nextOrReserved = 1 - enabled;
-        Rime.setOption((String) s.get("name"), nextOrReserved == 1);
-      }
-      s.put("enabled", nextOrReserved);
-      switches.set(index, s);
-    }
-  }
-
   private static Rime self;
 
   private static final RimeCommit mCommit = new RimeCommit();
   private static final RimeContext mContext = new RimeContext();
   private static final RimeStatus mStatus = new RimeStatus();
-  private static RimeSchema mSchema;
-  private static List<?> mSchemaList;
   private static boolean isHandlingRimeNotification;
 
   public static final MutableSharedFlow<RimeEvent> rimeNotiFlow_ =
@@ -272,13 +140,13 @@ public class Rime {
   Android和librime对按键命名并不一致。读取可能有误。librime按键命名见如下链接，
   https://github.com/rime/librime/blob/master/src/rime/key_table.cc
    */
-  public static int META_SHIFT_ON = get_modifier_by_name("Shift");
-  public static int META_CTRL_ON = get_modifier_by_name("Control");
-  public static int META_ALT_ON = get_modifier_by_name("Alt");
-  public static int META_SYM_ON = get_modifier_by_name("Super");
-  public static int META_META_ON = get_modifier_by_name("Meta");
+  public static int META_SHIFT_ON = getRimeModifierByName("Shift");
+  public static int META_CTRL_ON = getRimeModifierByName("Control");
+  public static int META_ALT_ON = getRimeModifierByName("Alt");
+  public static int META_SYM_ON = getRimeModifierByName("Super");
+  public static int META_META_ON = getRimeModifierByName("Meta");
 
-  public static int META_RELEASE_ON = get_modifier_by_name("Release");
+  public static int META_RELEASE_ON = getRimeModifierByName("Release");
 
   public static boolean hasMenu() {
     return isComposing() && mContext.menu.num_candidates != 0;
@@ -333,75 +201,32 @@ public class Rime {
   }
 
   public static void initSchema() {
-    mSchemaList = get_schema_list();
-    String schema_id = getSchemaId();
     Timber.d("initSchema() RimeSchema");
-    mSchema = new RimeSchema(schema_id);
+    SchemaManager.init(getCurrentRimeSchema());
     Timber.d("initSchema() getStatus");
     getStatus();
-    Timber.d("initSchema() done");
-    mSymbols = mSchema.symbolMap;
-  }
-
-  public static boolean hasSymbols(String key) {
-    return (mSymbols.containsKey(key));
-  }
-
-  public static List<String> getSymbols(String key) {
-    if (mSymbols.containsKey(key)) {
-      return (List<String>) mSymbols.get(key);
-    }
-    return new ArrayList<String>();
-  }
-
-  public static List<SimpleKeyBean> getSymbolKeyBeans() {
-    List<SimpleKeyBean> list = new ArrayList<>();
-    for (Map.Entry m : mSymbols.entrySet()) {
-      list.add(new SimpleKeyBean(m.getKey().toString()));
-    }
-    return list;
   }
 
   @SuppressWarnings("UnusedReturnValue")
   private static boolean getStatus() {
-    mSchema.updateSwitchOptions();
-    return get_status(mStatus);
+    SchemaManager.updateSwitchOptions();
+    return getRimeStatus(mStatus);
   }
 
   private static void init(boolean full_check) {
-    String methodName =
-        "\t<TrimeInit>\t" + Thread.currentThread().getStackTrace()[2].getMethodName() + "\t";
-    Timber.d(methodName);
     isHandlingRimeNotification = false;
+
+    DataManager.sync();
     final String sharedDataDir = getAppPrefs().getProfile().getSharedDataDir();
     final String userDataDir = getAppPrefs().getProfile().getUserDataDir();
 
-    Timber.d(methodName + "setup");
-    // Initialize librime APIs
-    setup(sharedDataDir, userDataDir);
-    Timber.d(methodName + "initlialize");
-    initialize(sharedDataDir, userDataDir);
+    Timber.i("Starting up Rime APIs ...");
+    startupRime(sharedDataDir, userDataDir, full_check);
 
-    Timber.d(methodName + "check");
-    check(full_check);
-    Timber.d(methodName + "set_notification_handler");
-    set_notification_handler();
-    if (!find_session()) {
-      if (create_session() == 0) {
-        Timber.wtf("Error creating rime session");
-        return;
-      }
-    }
-    Timber.d(methodName + "initSchema");
+    Timber.i("Initializing schema stuffs ...");
     initSchema();
 
-    Timber.d(methodName + "finish");
-  }
-
-  public static void destroy() {
-    destroy_session();
-    finalize1();
-    self = null;
+    Timber.i("Finishing startup");
   }
 
   public static String getCommitText() {
@@ -409,13 +234,13 @@ public class Rime {
   }
 
   public static boolean getCommit() {
-    return get_commit(mCommit);
+    return getRimeCommit(mCommit);
   }
 
   public static void getContexts() {
     Timber.i("\t<TrimeInput>\tgetContexts() get_context");
     // get_context() 是耗时操作
-    get_context(mContext);
+    getRimeContext(mContext);
     Timber.i("\t<TrimeInput>\tgetContexts() getStatus");
     getStatus();
     Timber.i("\t<TrimeInput>\tgetContexts() finish");
@@ -427,22 +252,16 @@ public class Rime {
   }
 
   // KeyProcess 调用JNI方法发送keycode和mask
-  private static boolean onKey(int keycode, int mask) {
+  public static boolean processKey(int keycode, int mask) {
     Timber.i("\t<TrimeInput>\tonkey()\tkeycode=%s, mask=%s", keycode, mask);
     if (isVoidKeycode(keycode)) return false;
     // 此处调用native方法是耗时操作
-    final boolean b = process_key(keycode, mask);
+    final boolean b = processRimeKey(keycode, mask);
     Timber.i(
         "\t<TrimeInput>\tonkey()\tkeycode=%s, mask=%s, process_key result=%s", keycode, mask, b);
     getContexts();
     Timber.i("\t<TrimeInput>\tonkey()\tfinish");
     return b;
-  }
-
-  // KeyProcess 调用JNI方法发送keycode和mask
-  public static boolean onKey(int[] event) {
-    if (event != null && event.length == 2) return onKey(event[0], event[1]);
-    return false;
   }
 
   public static boolean isValidText(CharSequence text) {
@@ -453,35 +272,25 @@ public class Rime {
 
   public static boolean onText(CharSequence text) {
     if (!isValidText(text)) return false;
-    boolean b = simulate_key_sequence(text.toString().replace("{}", "{braceleft}{braceright}"));
+    boolean b = simulateKeySequence(text.toString().replace("{}", "{braceleft}{braceright}"));
     Timber.i("simulate key sequence = %s, input = %s", b, text);
     getContexts();
     return b;
   }
 
-  public static RimeCandidate[] getCandidatesOrStatusSwitches() {
+  public static CandidateListItem[] getCandidatesOrStatusSwitches() {
     final boolean showSwitches = getAppPrefs().getKeyboard().getSwitchesEnabled();
-    if (!isComposing() && showSwitches) return mSchema.getStatusSwitches();
+    if (!isComposing() && showSwitches) return SchemaManager.getStatusSwitches();
     return mContext.getCandidates();
   }
 
-  public static RimeCandidate[] getCandidatesWithoutSwitch() {
+  public static CandidateListItem[] getCandidatesWithoutSwitch() {
     if (isComposing()) return mContext.getCandidates();
-    return new RimeCandidate[0];
+    return new CandidateListItem[0];
   }
 
   public static String[] getSelectLabels() {
-    if (mContext != null && mContext.size() > 0) {
-      if (mContext.select_labels != null) return mContext.select_labels;
-      if (mContext.menu.select_keys != null) return mContext.menu.select_keys.split("\\B");
-      int n = mContext.size();
-      String[] labels = new String[n];
-      for (int i = 0; i < n; i++) {
-        labels[i] = String.valueOf((i + 1) % 10);
-      }
-      return labels;
-    }
-    return null;
+    return mContext.select_labels;
   }
 
   public static int getCandHighlightIndex() {
@@ -489,35 +298,35 @@ public class Rime {
   }
 
   public static boolean commitComposition() {
-    boolean b = commit_composition();
+    boolean b = commitRimeComposition();
     getContexts();
     return b;
   }
 
   public static void clearComposition() {
-    clear_composition();
+    clearRimeComposition();
     getContexts();
   }
 
   public static boolean selectCandidate(int index) {
-    boolean b = select_candidate_on_current_page(index);
+    boolean b = selectRimeCandidateOnCurrentPage(index);
     getContexts();
     return b;
   }
 
   public static boolean deleteCandidate(int index) {
-    boolean b = delete_candidate_on_current_page(index);
+    boolean b = deleteRimeCandidateOnCurrentPage(index);
     getContexts();
     return b;
   }
 
   public static void setOption(String option, boolean value) {
     if (isHandlingRimeNotification) return;
-    set_option(option, value);
+    setRimeOption(option, value);
   }
 
   public static boolean getOption(String option) {
-    return get_option(option);
+    return getRimeOption(option);
   }
 
   public static void toggleOption(String option) {
@@ -525,138 +334,29 @@ public class Rime {
     setOption(option, !b);
   }
 
-  public static void toggleSwitchOption(int i) {
-    mSchema.toggleSwitchOption(i);
-  }
-
-  public static void setProperty(String prop, String value) {
-    if (isHandlingRimeNotification) return;
-    set_property(prop, value);
-  }
-
-  public static String getProperty(String prop) {
-    return get_property(prop);
-  }
-
-  public static String getSchemaId() {
-    return get_current_schema();
-  }
-
   private static boolean isEmpty(@NonNull String s) {
     return s.contentEquals(".default"); // 無方案
   }
 
   public static boolean isEmpty() {
-    return isEmpty(getSchemaId());
-  }
-
-  public static String[] getSchemaNames() {
-    int n = mSchemaList.size();
-    String[] names = new String[n];
-    int i = 0;
-    for (Object o : mSchemaList) {
-      Map<?, ?> m = (Map<?, ?>) o;
-      names[i++] = (String) m.get("name");
-    }
-    return names;
-  }
-
-  public static int getSchemaIndex() {
-    String schema_id = getSchemaId();
-    int i = 0;
-    for (Object o : mSchemaList) {
-      Map<?, ?> m = (Map<?, ?>) o;
-      if (m.get("schema_id").toString().contentEquals(schema_id)) return i;
-      i++;
-    }
-    return 0;
+    return isEmpty(getCurrentRimeSchema());
   }
 
   public static String getSchemaName() {
     return mStatus.schema_name;
   }
 
-  private static boolean selectSchema(String schema_id) {
-    Timber.d("selectSchema() schema_id=" + schema_id);
-    overWriteSchema(schema_id);
-    boolean b = select_schema(schema_id);
+  public static boolean selectSchema(String schemaId) {
+    Timber.d("Selecting schemaId=%s", schemaId);
+    boolean b = selectRimeSchema(schemaId);
     getContexts();
     return b;
-  }
-
-  // 刷新当前输入方案
-  public static void applySchemaChange() {
-    String schema_id = getSchemaId();
-    // 实测直接select_schema(schema_id)方案没有重新载入，切换到不存在的方案，再切回去（会产生1秒的额外耗时）.需要找到更好的方法
-    // 不发生覆盖则不生效
-    if (overWriteSchema(schema_id)) {
-      select_schema("nill");
-      select_schema(schema_id);
-    }
-    getContexts();
-  }
-  // 临时修改scheme文件参数
-  // 临时修改build后的scheme可以避免build过程的耗时
-  // 另外实际上jni读入yaml、修改、导出的效率并不高
-  private static boolean overWriteSchema(String schema_id) {
-    Map<String, String> map = new HashMap<>();
-    String page_size = AppPrefs.defaultInstance().getKeyboard().getCandidatePageSize();
-    Timber.d("overWriteSchema() page_size=" + page_size);
-    if (!page_size.equals("0")) {
-      map.put("page_size", page_size);
-    }
-    if (map.isEmpty()) return false;
-    return overWriteSchema(schema_id, map);
-  }
-
-  private static boolean overWriteSchema(String schema_id, Map<String, String> map) {
-    if (schema_id == null) schema_id = getSchemaId();
-    File file =
-        new File(Rime.getRimeUserDataDir() + File.separator + "build", schema_id + ".schema.yaml");
-    try {
-      FileReader in = new FileReader(file);
-      BufferedReader bufIn = new BufferedReader(in);
-      CharArrayWriter tempStream = new CharArrayWriter();
-      String line = null;
-      read:
-      while ((line = bufIn.readLine()) != null) {
-        for (String k : map.keySet()) {
-          String key = k + ": ";
-          if (line.contains(key)) {
-            String value = ": " + map.get(k) + System.getProperty("line.separator");
-            tempStream.write(line.replaceFirst(":.+", value));
-            map.remove(k);
-            continue read;
-          }
-        }
-        tempStream.write(line);
-        tempStream.append(System.getProperty("line.separator"));
-      }
-      bufIn.close();
-      FileWriter out = new FileWriter(file);
-      tempStream.writeTo(out);
-      out.close();
-    } catch (IOException e) {
-      e.printStackTrace();
-      return false;
-    }
-    return map.isEmpty();
-  }
-
-  public static boolean selectSchema(int id) {
-    int n = mSchemaList.size();
-    if (id < 0 || id >= n) return false;
-    final String schema_id = getSchemaId();
-    Map<String, String> m = (Map<String, String>) mSchemaList.get(id);
-    final String target = m.get("schema_id");
-    if (target.contentEquals(schema_id)) return false;
-    return selectSchema(target);
   }
 
   public static Rime get(boolean full_check) {
     if (self == null) {
       if (full_check) {
-        OpenCCDictManager.internalDeploy();
+        OpenCCDictManager.buildOpenCCDict();
       }
       self = new Rime(full_check);
     }
@@ -667,17 +367,8 @@ public class Rime {
     return get(false);
   }
 
-  public static String RimeGetInput() {
-    String s = get_input();
-    return s == null ? "" : s;
-  }
-
-  public static int RimeGetCaretPos() {
-    return get_caret_pos();
-  }
-
   public static void RimeSetCaretPos(int caret_pos) {
-    set_caret_pos(caret_pos);
+    setRimeCaretPos(caret_pos);
     getContexts();
   }
 
@@ -690,212 +381,89 @@ public class Rime {
     isHandlingRimeNotification = false;
   }
 
-  public static String openccConvert(String line, String name) {
-    if (!TextUtils.isEmpty(name)) {
-      final File f = new File(DataManager.getDataDir("opencc"), name);
-      if (f.exists()) return opencc_convert(line, f.getAbsolutePath());
-    }
-    return line;
-  }
-
-  public static void check(boolean full_check) {
-    if (start_maintenance(full_check) && is_maintenance_mode()) {
-      join_maintenance_thread();
-    }
-  }
-
-  public static boolean syncUserData(Context context) {
-    boolean b = sync_user_data();
-    destroy();
-    get(true);
-    return b;
-  }
-
   // init
-  public static native void setup(String shared_data_dir, String user_data_dir);
+  public static native void startupRime(
+      @NonNull String sharedDir, @NonNull String userDir, boolean fullCheck);
 
-  public static native void set_notification_handler();
+  public static native void deployRime();
 
-  // entry and exit
-  public static native void initialize(String shared_data_dir, String user_data_dir);
-
-  public static native void finalize1();
-
-  public static native boolean start_maintenance(boolean full_check);
-
-  public static native boolean is_maintenance_mode();
-
-  public static native void join_maintenance_thread();
-
-  // deployment
-  public static native void deployer_initialize(String shared_data_dir, String user_data_dir);
-
-  public static native boolean prebuild();
-
-  public static native boolean deploy();
-
-  public static native boolean deploy_schema(String schema_file);
+  public static native boolean deployRimeSchemaFile(@NonNull String schemaFile);
 
   public static native boolean deployRimeConfigFile(
       @NonNull String fileName, @NonNull String versionKey);
 
-  /**
-   * 部署config文件到build目录
-   *
-   * @param name 配置名称，不含yaml后缀
-   * @param skipIfExists 启用此模式时，如build目录已经存在对应名称的文件，且大小超过10k，则不重新部署，从而节约时间
-   * @return
-   */
-  public static boolean deploy_config_file(String name, boolean skipIfExists) {
-    String file_name = name + ".yaml";
-    if (skipIfExists) {
-      File f = new File(Rime.getRimeUserDataDir() + File.separator + "build", file_name);
-      if (f.exists()) {
-        if (f.length() > 10000) {
-          Timber.d("deploy_config_file() skip");
-          return true;
-        }
-      } else {
-        return Rime.deployRimeConfigFile(file_name, "config_version");
-      }
-    }
-    return Rime.deployRimeConfigFile(file_name, "config_version");
-  }
-
-  public static native boolean sync_user_data();
-
-  // session management
-  public static native int create_session();
-
-  public static native boolean find_session();
-
-  public static native boolean destroy_session();
-
-  public static native void cleanup_stale_sessions();
-
-  public static native void cleanup_all_sessions();
+  public static native boolean syncRimeUserData();
 
   // input
-  public static native boolean process_key(int keycode, int mask);
+  public static native boolean processRimeKey(int keycode, int mask);
 
-  public static native boolean commit_composition();
+  public static native boolean commitRimeComposition();
 
-  public static native void clear_composition();
+  public static native void clearRimeComposition();
 
   // output
-  public static native boolean get_commit(RimeCommit commit);
+  public static native boolean getRimeCommit(RimeCommit commit);
 
-  public static native boolean get_context(RimeContext context);
+  public static native boolean getRimeContext(RimeContext context);
 
-  public static native boolean get_status(RimeStatus status);
+  public static native boolean getRimeStatus(RimeStatus status);
 
   // runtime options
-  public static native void set_option(String option, boolean value);
+  public static native void setRimeOption(@NonNull String option, boolean value);
 
-  public static native boolean get_option(String option);
-
-  public static native void set_property(String prop, String value);
-
-  public static native String get_property(String prop);
-
-  @Nullable
-  public static native List<Map<String, String>> get_schema_list();
+  public static native boolean getRimeOption(@NonNull String option);
 
   @NonNull
-  public static native String get_current_schema();
+  public static native SchemaListItem[] getRimeSchemaList();
 
-  public static native boolean select_schema(String schema_id);
+  @NonNull
+  public static native String getCurrentRimeSchema();
 
-  // configuration
-  public static native Boolean config_get_bool(String name, String key);
-
-  public static native boolean config_set_bool(String name, String key, boolean value);
-
-  public static native Integer config_get_int(String name, String key);
-
-  public static native boolean config_set_int(String name, String key, int value);
-
-  public static native Double config_get_double(String name, String key);
-
-  public static native boolean config_set_double(String name, String key, double value);
-
-  public static native String config_get_string(String name, String key);
-
-  public static native boolean config_set_string(String name, String key, String value);
-
-  public static native int config_list_size(String name, String key);
-
-  public static native List config_get_list(String name, String key);
+  public static native boolean selectRimeSchema(@NonNull String schemaId);
 
   @Nullable
   public static native Map<String, Object> getRimeConfigMap(
       @NonNull String configId, @NonNull String key);
 
-  public static native Object getRimeConfigValue(@NonNull String configId, @NonNull String key);
-
-  public static native Object getRimeSchemaValue(@NonNull String schemaId, @NonNull String key);
+  public static native void setRimeCustomConfigInt(
+      @NonNull String configId, @NonNull Pair<String, Integer>[] keyValuePairs);
 
   // testing
-  public static native boolean simulate_key_sequence(String key_sequence);
+  public static native boolean simulateKeySequence(@NonNull String keySequence);
 
-  public static native String get_input();
+  public static native String getRimeRawInput();
 
-  public static native int get_caret_pos();
+  public static native int getRimeCaretPos();
 
-  public static native void set_caret_pos(int caret_pos);
+  public static native void setRimeCaretPos(int caretPos);
 
-  public static native boolean select_candidate(int index);
+  public static native boolean selectRimeCandidateOnCurrentPage(int index);
 
-  public static native boolean select_candidate_on_current_page(int index);
+  public static native boolean deleteRimeCandidateOnCurrentPage(int index);
 
-  public static native boolean delete_candidate(int index);
-
-  public static native boolean delete_candidate_on_current_page(int index);
-
-  public static native String get_version();
-
-  public static native String get_librime_version();
+  public static native String getLibrimeVersion();
 
   // module
-  public static native boolean run_task(String task_name);
+  public static native boolean runRimeTask(String task_name);
 
-  public static native String get_shared_data_dir();
+  public static native String getRimeSharedDataDir();
 
   public static native String getRimeUserDataDir();
 
-  public static native String get_sync_dir();
+  public static native String getRimeSyncDir();
 
-  public static native String get_user_id();
+  public static native String getRimeUserId();
 
   // key_table
-  public static native int get_modifier_by_name(String name);
+  public static native int getRimeModifierByName(@NonNull String name);
 
-  public static native int get_keycode_by_name(String name);
+  public static native int getRimeKeycodeByName(@NonNull String name);
 
-  // customize setting
-  public static native boolean customize_bool(String name, String key, boolean value);
+  @NonNull
+  public static native SchemaListItem[] getAvailableRimeSchemaList();
 
-  public static native boolean customize_int(String name, String key, int value);
+  @NonNull
+  public static native SchemaListItem[] getSelectedRimeSchemaList();
 
-  public static native boolean customize_double(String name, String key, double value);
-
-  public static native boolean customize_string(String name, String key, String value);
-
-  @Nullable
-  public static native List<Map<String, String>> get_available_schema_list();
-
-  @Nullable
-  public static native List<Map<String, String>> get_selected_schema_list();
-
-  public static native boolean select_schemas(String[] schema_id_list);
-
-  // opencc
-  public static native String get_opencc_version();
-
-  public static native String opencc_convert(String line, String name);
-
-  public static native void opencc_convert_dictionary(
-      String inputFileName, String outputFileName, String formatFrom, String formatTo);
-
-  public static native String get_trime_version();
+  public static native boolean selectRimeSchemas(@NonNull String[] schemaIds);
 }

@@ -1,7 +1,7 @@
 package com.osfans.trime.ime.symbol;
 
 import androidx.annotation.NonNull;
-import com.osfans.trime.core.Rime;
+import com.osfans.trime.data.schema.SchemaManager;
 import com.osfans.trime.data.theme.Config;
 import com.osfans.trime.ime.enums.KeyCommandType;
 import com.osfans.trime.ime.enums.SymbolKeyboardType;
@@ -100,14 +100,19 @@ public class TabManager {
   // 处理single类型和no_key类型。前者把字符串切分为多个按键，后者把字符串转换为命令
   public void addTab(String name, SymbolKeyboardType type, String string) {
     if (string == null) return;
-
-    if (type == SymbolKeyboardType.SINGLE) {
-      addTab(name, type, SimpleKeyDao.Single(string));
-    } else if (type == SymbolKeyboardType.NO_KEY) {
-      KeyCommandType command = KeyCommandType.Companion.fromString(string);
-      tabTags.add(new TabTag(name, type, command));
-      keyboards.add(notKeyboard);
-    } else addTab(name, type, SimpleKeyDao.SimpleKeyboard(string));
+    switch (type) {
+      case SINGLE:
+        addTab(name, type, SimpleKeyDao.Single(string));
+        break;
+      case NO_KEY:
+        final KeyCommandType commandType = KeyCommandType.fromString(string);
+        tabTags.add(new TabTag(name, type, commandType));
+        keyboards.add(notKeyboard);
+        break;
+      default:
+        addTab(name, type, SimpleKeyDao.SimpleKeyboard(string));
+        break;
+    }
   }
 
   // 解析config的数据
@@ -134,8 +139,10 @@ public class TabManager {
                   keys.add(new SimpleKeyBean((String) p.get("click"), (String) p.get("label")));
                 else keys.add(new SimpleKeyBean((String) p.get("click")));
               } else {
+                final Map<String, List<String>> symbolMaps =
+                    SchemaManager.getActiveSchema().getPunctuator().getSymbols();
                 for (Map.Entry<String, String> entry : p.entrySet()) {
-                  if (Rime.hasSymbols(entry.getValue()))
+                  if (symbolMaps != null && symbolMaps.containsKey(entry.getValue()))
                     keys.add(new SimpleKeyBean(entry.getValue(), entry.getKey()));
                 }
               }

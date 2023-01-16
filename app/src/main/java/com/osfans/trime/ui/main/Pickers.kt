@@ -3,8 +3,11 @@ package com.osfans.trime.ui.main
 import android.content.Context
 import androidx.annotation.StyleRes
 import androidx.appcompat.app.AlertDialog
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.osfans.trime.R
 import com.osfans.trime.core.Rime
+import com.osfans.trime.core.SchemaListItem
 import com.osfans.trime.data.AppPrefs
 import com.osfans.trime.data.sound.SoundTheme
 import com.osfans.trime.data.sound.SoundThemeManager
@@ -12,8 +15,12 @@ import com.osfans.trime.data.theme.Config
 import com.osfans.trime.data.theme.ThemeManager
 import com.osfans.trime.ime.core.Trime
 import com.osfans.trime.ui.components.CoroutineChoiceDialog
+import com.osfans.trime.util.ProgressBarDialogIndeterminate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 suspend fun Context.themePicker(
     @StyleRes themeResId: Int = 0
@@ -67,32 +74,43 @@ suspend fun Context.colorPicker(
     }.create()
 }
 
-suspend fun Context.schemaPicker(
+fun Context.schemaPicker(
     @StyleRes themeResId: Int = 0
 ): AlertDialog {
-    return CoroutineChoiceDialog(this, themeResId).apply {
-        title = getString(R.string.pref_select_schemas)
-        initDispatcher = Dispatchers.IO
-        onInit {
-            items = Rime.get_available_schema_list()
-                ?.map { it["schema_id"]!! }
-                ?.toTypedArray() ?: arrayOf()
-            val checked = Rime.get_selected_schema_list()
-                ?.map { it["schema_id"]!! }
-                ?.toTypedArray() ?: arrayOf()
-            checkedItems = items.map { checked.contains(it) }.toBooleanArray()
+    val available = Rime.getAvailableRimeSchemaList()
+    val selected = Rime.getSelectedRimeSchemaList()
+    val availableIds = available.mapNotNull(SchemaListItem::schemaId)
+    val selectedIds = selected.mapNotNull(SchemaListItem::schemaId)
+    val checked = availableIds.map(selectedIds::contains).toBooleanArray()
+    return AlertDialog.Builder(this, themeResId)
+        .setTitle(R.string.pref_select_schemas)
+        .setMultiChoiceItems(
+            available.mapNotNull(SchemaListItem::name).toTypedArray(),
+            checked
+        ) { _, id, isChecked -> checked[id] = isChecked }
+        .setPositiveButton(android.R.string.ok) { _, _ ->
+            (this as LifecycleOwner).lifecycleScope.launch {
+                Rime.selectRimeSchemas(
+                    availableIds
+                        .filterIndexed { i, _ -> checked[i] }
+                        .toTypedArray()
+                )
+                val loading = ProgressBarDialogIndeterminate(titleId = R.string.deploy_progress).create()
+                val job = launch {
+                    delay(200L)
+                    loading.show()
+                }
+                withContext(Dispatchers.Default) {
+                    Rime.deployRime()
+                    job.cancelAndJoin()
+                    if (loading.isShowing) {
+                        loading.dismiss()
+                    }
+                }
+            }
         }
-        postiveDispatcher = Dispatchers.Default
-        onOKButton {
-            Rime.select_schemas(
-                items.filterIndexed { index, _ ->
-                    checkedItems[index]
-                }.map { it.toString() }.toTypedArray()
-            )
-            Rime.destroy()
-            Rime.get(true)
-        }
-    }.create()
+        .setNegativeButton(android.R.string.cancel, null)
+        .create()
 }
 
 fun Context.soundPicker(
