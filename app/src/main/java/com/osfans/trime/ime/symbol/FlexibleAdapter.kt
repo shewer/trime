@@ -12,15 +12,16 @@ import androidx.recyclerview.widget.RecyclerView
 import com.osfans.trime.R
 import com.osfans.trime.data.db.CollectionHelper
 import com.osfans.trime.data.db.DatabaseBean
-import com.osfans.trime.data.theme.Config
 import com.osfans.trime.data.theme.FontManager
+import com.osfans.trime.data.theme.Theme
 import com.osfans.trime.databinding.SimpleKeyItemBinding
 import kotlinx.coroutines.launch
 
 class FlexibleAdapter(
-    private val theme: Config
+    private val theme: Theme,
 ) : RecyclerView.Adapter<FlexibleAdapter.ViewHolder>() {
     private val mBeans = mutableListOf<DatabaseBean>()
+
     // 映射条目的 id 和其在视图中位置的关系
     // 以应对增删条目时 id 和其位置的相对变化
     private val mBeansId = mutableMapOf<Int, Int>()
@@ -65,7 +66,7 @@ class FlexibleAdapter(
                 text = bean.text
                 typeface = FontManager.getTypeface(theme.style.getString("long_text_font"))
                 when (val textColor = theme.colors.getColor("long_text_color")) {
-                    null -> setTextColor(theme.colors.getColor("key_text_color"))
+                    null -> theme.colors.getColor("key_text_color")?.let { setTextColor(it) }
                     else -> setTextColor(textColor)
                 }
 
@@ -85,7 +86,7 @@ class FlexibleAdapter(
                 "key_border",
                 "key_long_text_border",
                 "round_corner",
-                null
+                null,
             )
 
             // 如果设置了回调，则设置点击事件

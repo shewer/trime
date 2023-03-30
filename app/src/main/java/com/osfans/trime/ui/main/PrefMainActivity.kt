@@ -83,7 +83,7 @@ class PrefMainActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar.toolbar)
         val appBarConfiguration = AppBarConfiguration(
             topLevelDestinationIds = setOf(),
-            fallbackOnNavigateUpListener = ::onNavigateUpListener
+            fallbackOnNavigateUpListener = ::onNavigateUpListener,
         )
         navHostFragment =
             supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment
@@ -115,13 +115,14 @@ class PrefMainActivity : AppCompatActivity() {
         return when (item.itemId) {
             R.id.preference__menu_deploy -> {
                 lifecycleScope.withLoadingDialog(
-                    context = this, titleId = R.string.deploy_progress
+                    context = this,
+                    titleId = R.string.deploy_progress,
                 ) {
                     withContext(Dispatchers.IO) {
                         Runtime.getRuntime().exec(arrayOf("logcat", "-c"))
                     }
                     withContext(Dispatchers.Default) {
-                        Rime.deployRime()
+                        Rime.deploy()
                     }
                     briefResultLogDialog("rime.trime", "W", 1)
                 }
@@ -142,20 +143,21 @@ class PrefMainActivity : AppCompatActivity() {
 
     private fun requestExternalStoragePermission() {
         XXPermissions.with(this)
-            .permission(Permission.Group.STORAGE)
+            .permission(Permission.MANAGE_EXTERNAL_STORAGE)
             .request(object : OnPermissionCallback {
-                override fun onGranted(permissions: MutableList<String>?, all: Boolean) {
+                override fun onGranted(permissions: List<String>, all: Boolean) {
                     if (all) {
                         ToastUtils.showShort(R.string.external_storage_permission_granted)
                         SoundThemeManager.init()
                     }
                 }
 
-                override fun onDenied(permissions: MutableList<String>?, never: Boolean) {
+                override fun onDenied(permissions: List<String>, never: Boolean) {
                     if (never) {
                         ToastUtils.showShort(R.string.external_storage_permission_denied)
                         XXPermissions.startPermissionActivity(
-                            this@PrefMainActivity, permissions
+                            this@PrefMainActivity,
+                            permissions,
                         )
                     } else {
                         ToastUtils.showShort(R.string.external_storage_permission_denied)

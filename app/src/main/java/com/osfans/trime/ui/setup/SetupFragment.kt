@@ -8,17 +8,19 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import com.osfans.trime.databinding.FragmentSetupBinding
 import com.osfans.trime.ui.setup.SetupPage.Companion.isLastPage
+import com.osfans.trime.util.serializable
 
 class SetupFragment : Fragment() {
     private val viewModel: SetupViewModel by activityViewModels()
     private lateinit var binding: FragmentSetupBinding
 
-    private val page: SetupPage by lazy { requireArguments().get("page") as SetupPage }
+    private val page: SetupPage by lazy { requireArguments().serializable("page")!! }
 
     private var isDone: Boolean = false
         set(new) {
-            if (new && page.isLastPage())
+            if (new && page.isLastPage()) {
                 viewModel.isAllDone.value = true
+            }
             with(binding) {
                 stepText.text = page.getStepText(requireContext())
                 hintText.text = page.getHintText(requireContext())
@@ -33,7 +35,7 @@ class SetupFragment : Fragment() {
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
-        savedInstanceState: Bundle?
+        savedInstanceState: Bundle?,
     ): View {
         binding = FragmentSetupBinding.inflate(inflater)
         sync()

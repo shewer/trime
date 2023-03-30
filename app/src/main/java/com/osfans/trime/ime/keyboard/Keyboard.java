@@ -21,8 +21,8 @@ package com.osfans.trime.ime.keyboard;
 import android.graphics.drawable.Drawable;
 import android.view.KeyEvent;
 import com.blankj.utilcode.util.ScreenUtils;
-import com.osfans.trime.data.theme.Config;
-import com.osfans.trime.util.ConfigGetter;
+import com.osfans.trime.data.theme.Theme;
+import com.osfans.trime.util.CollectionUtils;
 import com.osfans.trime.util.DimensionsKt;
 import java.util.ArrayList;
 import java.util.List;
@@ -98,28 +98,28 @@ public class Keyboard {
 
     // 橫屏模式下，键盘左右两侧到屏幕边缘的距离
 
-    final Config config = Config.get();
-    int[] keyboardPadding = config.getKeyboardPadding();
+    final Theme theme = Theme.get();
+    int[] keyboardPadding = theme.getKeyboardPadding();
     mDisplayWidth = ScreenUtils.getScreenWidth() - keyboardPadding[0] - keyboardPadding[1];
     /* Height of the screen */
     // final int mDisplayHeight = dm.heightPixels;
     // Log.v(TAG, "keyboard's display metrics:" + dm);
 
-    mDefaultHorizontalGap = (int) DimensionsKt.dp2px(config.style.getFloat("horizontal_gap"));
-    mDefaultVerticalGap = (int) DimensionsKt.dp2px(config.style.getFloat("vertical_gap"));
-    mDefaultWidth = (int) (mDisplayWidth * config.style.getFloat("key_width") / 100);
+    mDefaultHorizontalGap = (int) DimensionsKt.dp2px(theme.style.getFloat("horizontal_gap"));
+    mDefaultVerticalGap = (int) DimensionsKt.dp2px(theme.style.getFloat("vertical_gap"));
+    mDefaultWidth = (int) (mDisplayWidth * theme.style.getFloat("key_width") / 100);
 
-    mDefaultHeight = (int) DimensionsKt.dp2px(config.style.getFloat("key_height"));
+    mDefaultHeight = (int) DimensionsKt.dp2px(theme.style.getFloat("key_height"));
 
     mProximityThreshold = (int) (mDefaultWidth * SEARCH_DISTANCE);
     mProximityThreshold = mProximityThreshold * mProximityThreshold; // Square it for comparison
-    mRoundCorner = config.style.getFloat("round_corner");
-    mBackground = config.colors.getDrawable("keyboard_back_color");
+    mRoundCorner = theme.style.getFloat("round_corner");
+    mBackground = theme.colors.getDrawable("keyboard_back_color");
 
-    keyboardHeight = (int) DimensionsKt.dp2px(config.style.getFloat("keyboard_height"));
+    keyboardHeight = (int) DimensionsKt.dp2px(theme.style.getFloat("keyboard_height"));
     if (ScreenUtils.isLandscape()) {
       int keyBoardHeightLand =
-          (int) DimensionsKt.dp2px(config.style.getFloat("keyboard_height_land"));
+          (int) DimensionsKt.dp2px(theme.style.getFloat("keyboard_height_land"));
       if (keyBoardHeightLand > 0) keyboardHeight = keyBoardHeightLand;
     }
 
@@ -178,44 +178,48 @@ public class Keyboard {
 
   public Keyboard(String name) {
     this();
-    Config config = Config.get();
+    Theme theme = Theme.get();
     final Map<String, Object> keyboardConfig;
-    final Object v = config.keyboards.getObject(name);
+    final Object v = theme.keyboards.getObject(name);
     if (v != null) {
       keyboardConfig = (Map<String, Object>) v;
     } else {
-      keyboardConfig = (Map<String, Object>) config.keyboards.getObject("default");
+      keyboardConfig = (Map<String, Object>) theme.keyboards.getObject("default");
     }
-    mLabelTransform = ConfigGetter.getString(keyboardConfig, "label_transform", "none");
-    mAsciiMode = ConfigGetter.getInt(keyboardConfig, "ascii_mode", 1);
+    mLabelTransform = CollectionUtils.obtainString(keyboardConfig, "label_transform", "none");
+    mAsciiMode = CollectionUtils.obtainInt(keyboardConfig, "ascii_mode", 1);
     if (mAsciiMode == 0)
-      mAsciiKeyboard = ConfigGetter.getString(keyboardConfig, "ascii_keyboard", "");
-    resetAsciiMode = ConfigGetter.getBoolean(keyboardConfig, "reset_ascii_mode", false);
-    mLock = ConfigGetter.getBoolean(keyboardConfig, "lock", false);
-    int columns = ConfigGetter.getInt(keyboardConfig, "columns", 30);
+      mAsciiKeyboard = CollectionUtils.obtainString(keyboardConfig, "ascii_keyboard", "");
+    resetAsciiMode = CollectionUtils.obtainBoolean(keyboardConfig, "reset_ascii_mode", false);
+    mLock = CollectionUtils.obtainBoolean(keyboardConfig, "lock", false);
+    int columns = CollectionUtils.obtainInt(keyboardConfig, "columns", 30);
     int defaultWidth =
-        (int) (ConfigGetter.getDouble(keyboardConfig, "width", 0d) * mDisplayWidth / 100);
+        (int) (CollectionUtils.obtainFloat(keyboardConfig, "width", 0f) * mDisplayWidth / 100);
     if (defaultWidth == 0) defaultWidth = mDefaultWidth;
 
     // 按键高度取值顺序： keys > keyboard/height > style/key_height
     // 考虑到key设置height_land需要对皮肤做大量修改，而当部分key设置height而部分没有设时会造成按键高度异常，故取消普通按键的height_land参数
-    int height = ConfigGetter.getPixel(keyboardConfig, "height", 0);
+    int height = (int) DimensionsKt.sp2px(CollectionUtils.obtainFloat(keyboardConfig, "height", 0));
     int defaultHeight = (height > 0) ? height : mDefaultHeight;
     int rowHeight = defaultHeight;
-    autoHeightIndex = ConfigGetter.getInt(keyboardConfig, "auto_height_index", -1);
+    autoHeightIndex = CollectionUtils.obtainInt(keyboardConfig, "auto_height_index", -1);
     List<Map<String, Object>> lm = (List<Map<String, Object>>) keyboardConfig.get("keys");
 
     mDefaultHorizontalGap =
-        ConfigGetter.getPixel(
-            keyboardConfig, "horizontal_gap", config.style.getFloat("horizontal_gap"));
+        (int)
+            DimensionsKt.sp2px(
+                CollectionUtils.obtainFloat(
+                    keyboardConfig, "horizontal_gap", theme.style.getFloat("horizontal_gap")));
     mDefaultVerticalGap =
-        ConfigGetter.getPixel(
-            keyboardConfig, "vertical_gap", config.style.getFloat("vertical_gap"));
+        (int)
+            DimensionsKt.sp2px(
+                CollectionUtils.obtainFloat(
+                    keyboardConfig, "vertical_gap", theme.style.getFloat("vertical_gap")));
     mRoundCorner =
-        ConfigGetter.getFloat(
-            keyboardConfig, "round_corner", config.style.getFloat("round_corner"));
+        CollectionUtils.obtainFloat(
+            keyboardConfig, "round_corner", theme.style.getFloat("round_corner"));
 
-    Drawable background = config.colors.getDrawable(keyboardConfig, "keyboard_back_color");
+    Drawable background = theme.colors.getDrawable(keyboardConfig, "keyboard_back_color");
     if (background != null) mBackground = background;
 
     int x = mDefaultHorizontalGap / 2;
@@ -229,9 +233,14 @@ public class Keyboard {
     int[] newHeight = new int[0];
 
     if (keyboardHeight > 0) {
-      int mkeyboardHeight = ConfigGetter.getPixel(keyboardConfig, "keyboard_height", 0);
+      int mkeyboardHeight =
+          (int)
+              DimensionsKt.sp2px(CollectionUtils.obtainFloat(keyboardConfig, "keyboard_height", 0));
       if (ScreenUtils.isLandscape()) {
-        int mkeyBoardHeightLand = ConfigGetter.getPixel(keyboardConfig, "keyboard_height_land", 0);
+        int mkeyBoardHeightLand =
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(keyboardConfig, "keyboard_height_land", 0));
         if (mkeyBoardHeightLand > 0) mkeyboardHeight = mkeyBoardHeightLand;
       }
 
@@ -241,7 +250,7 @@ public class Keyboard {
       List<Integer> rawHeight = new ArrayList<>();
       for (Map<String, Object> mk : lm) {
         int gap = mDefaultHorizontalGap;
-        int w = (int) (ConfigGetter.getDouble(mk, "width", 0) * mDisplayWidth / 100);
+        int w = (int) (CollectionUtils.obtainFloat(mk, "width", 0) * mDisplayWidth / 100);
         if (w == 0 && mk.containsKey("click")) w = defaultWidth;
         w -= gap;
         if (column >= maxColumns || x + w > mDisplayWidth) {
@@ -253,7 +262,7 @@ public class Keyboard {
           rawHeight.add(rowHeight);
         }
         if (column == 0) {
-          int heightK = ConfigGetter.getPixel(mk, "height", 0);
+          int heightK = (int) DimensionsKt.sp2px(CollectionUtils.obtainFloat(mk, "height", 0));
           rowHeight = (heightK > 0) ? heightK : defaultHeight;
         }
         if (!mk.containsKey("click")) { // 無按鍵事件
@@ -325,7 +334,7 @@ public class Keyboard {
     try {
       for (Map<String, Object> mk : lm) {
         int gap = mDefaultHorizontalGap;
-        int w = (int) (ConfigGetter.getDouble(mk, "width", 0) * mDisplayWidth / 100);
+        int w = (int) (CollectionUtils.obtainFloat(mk, "width", 0) * mDisplayWidth / 100);
         if (w == 0 && mk.containsKey("click")) w = defaultWidth;
         w -= gap;
         if (column >= maxColumns || x + w > mDisplayWidth) {
@@ -339,7 +348,7 @@ public class Keyboard {
           if (keyboardHeight > 0) {
             rowHeight = newHeight[row];
           } else {
-            int heightK = ConfigGetter.getPixel(mk, "height", 0);
+            int heightK = (int) DimensionsKt.sp2px(CollectionUtils.obtainFloat(mk, "height", 0));
             rowHeight = (heightK > 0) ? heightK : defaultHeight;
           }
         }
@@ -349,51 +358,85 @@ public class Keyboard {
         }
 
         final int defaultKeyTextOffsetX =
-            ConfigGetter.getPixel(
-                keyboardConfig, "key_text_offset_x", config.style.getFloat("key_text_offset_x"));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        keyboardConfig,
+                        "key_text_offset_x",
+                        theme.style.getFloat("key_text_offset_x")));
         final int defaultKeyTextOffsetY =
-            ConfigGetter.getPixel(
-                keyboardConfig, "key_text_offset_y", config.style.getFloat("key_text_offset_y"));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        keyboardConfig,
+                        "key_text_offset_y",
+                        theme.style.getFloat("key_text_offset_y")));
         final int defaultKeySymbolOffsetX =
-            ConfigGetter.getPixel(
-                keyboardConfig,
-                "key_symbol_offset_x",
-                config.style.getFloat("key_symbol_offset_x"));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        keyboardConfig,
+                        "key_symbol_offset_x",
+                        theme.style.getFloat("key_symbol_offset_x")));
         final int defaultKeySymbolOffsetY =
-            ConfigGetter.getPixel(
-                keyboardConfig,
-                "key_symbol_offset_y",
-                config.style.getFloat("key_symbol_offset_y"));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        keyboardConfig,
+                        "key_symbol_offset_y",
+                        theme.style.getFloat("key_symbol_offset_y")));
         final int defaultKeyHintOffsetX =
-            ConfigGetter.getPixel(
-                keyboardConfig, "key_hint_offset_x", config.style.getFloat("key_hint_offset_x"));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        keyboardConfig,
+                        "key_hint_offset_x",
+                        theme.style.getFloat("key_hint_offset_x")));
         final int defaultKeyHintOffsetY =
-            ConfigGetter.getPixel(
-                keyboardConfig, "key_hint_offset_y", config.style.getFloat("key_hint_offset_y"));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        keyboardConfig,
+                        "key_hint_offset_y",
+                        theme.style.getFloat("key_hint_offset_y")));
         final int defaultKeyPressOffsetX =
-            ConfigGetter.getInt(
-                keyboardConfig, "key_press_offset_x", config.style.getInt("key_press_offset_x"));
+            CollectionUtils.obtainInt(
+                keyboardConfig, "key_press_offset_x", theme.style.getInt("key_press_offset_x"));
         final int defaultKeyPressOffsetY =
-            ConfigGetter.getInt(
-                keyboardConfig, "key_press_offset_y", config.style.getInt("key_press_offset_y"));
+            CollectionUtils.obtainInt(
+                keyboardConfig, "key_press_offset_y", theme.style.getInt("key_press_offset_y"));
 
         final Key key = new Key(this, mk);
         key.setKey_text_offset_x(
-            ConfigGetter.getPixel(mk, "key_text_offset_x", defaultKeyTextOffsetX));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(mk, "key_text_offset_x", defaultKeyTextOffsetX)));
         key.setKey_text_offset_y(
-            ConfigGetter.getPixel(mk, "key_text_offset_y", defaultKeyTextOffsetY));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(mk, "key_text_offset_y", defaultKeyTextOffsetY)));
         key.setKey_symbol_offset_x(
-            ConfigGetter.getPixel(mk, "key_symbol_offset_x", defaultKeySymbolOffsetX));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        mk, "key_symbol_offset_x", defaultKeySymbolOffsetX)));
         key.setKey_symbol_offset_y(
-            ConfigGetter.getPixel(mk, "key_symbol_offset_y", defaultKeySymbolOffsetY));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(
+                        mk, "key_symbol_offset_y", defaultKeySymbolOffsetY)));
         key.setKey_hint_offset_x(
-            ConfigGetter.getPixel(mk, "key_hint_offset_x", defaultKeyHintOffsetX));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(mk, "key_hint_offset_x", defaultKeyHintOffsetX)));
         key.setKey_hint_offset_y(
-            ConfigGetter.getPixel(mk, "key_hint_offset_y", defaultKeyHintOffsetY));
+            (int)
+                DimensionsKt.sp2px(
+                    CollectionUtils.obtainFloat(mk, "key_hint_offset_y", defaultKeyHintOffsetY)));
         key.setKey_press_offset_x(
-            ConfigGetter.getInt(mk, "key_press_offset_x", defaultKeyPressOffsetX));
+            CollectionUtils.obtainInt(mk, "key_press_offset_x", defaultKeyPressOffsetX));
         key.setKey_press_offset_y(
-            ConfigGetter.getInt(mk, "key_press_offset_y", defaultKeyPressOffsetY));
+            CollectionUtils.obtainInt(mk, "key_press_offset_y", defaultKeyPressOffsetY));
 
         key.setX(x);
         key.setY(y);

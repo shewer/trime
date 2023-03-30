@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.osfans.trime.data.AppPrefs
 import com.osfans.trime.ime.core.Trime
-import com.osfans.trime.util.StringUtils.mismatch
+import com.osfans.trime.util.StringUtils.matches
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,7 +68,7 @@ object DraftHelper : CoroutineScope by CoroutineScope(SupervisorJob() + Dispatch
             ?.let { DatabaseBean.fromInputConnection(it) }
             ?.takeIf {
                 it.text!!.isNotBlank() &&
-                    it.text.mismatch(output.toTypedArray())
+                    !it.text.matches(output.toTypedArray())
             }
             ?.let { b ->
                 Timber.d("Accept $b")
@@ -94,8 +94,11 @@ object DraftHelper : CoroutineScope by CoroutineScope(SupervisorJob() + Dispatch
         if (all.size > limit) {
             val outdated = all
                 .map {
-                    if (it.pinned) it.copy(id = Int.MAX_VALUE)
-                    else it
+                    if (it.pinned) {
+                        it.copy(id = Int.MAX_VALUE)
+                    } else {
+                        it
+                    }
                 }
                 .sortedBy { it.id }
                 .subList(0, all.size - limit)

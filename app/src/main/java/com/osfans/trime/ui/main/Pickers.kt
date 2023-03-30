@@ -11,7 +11,7 @@ import com.osfans.trime.core.SchemaListItem
 import com.osfans.trime.data.AppPrefs
 import com.osfans.trime.data.sound.SoundTheme
 import com.osfans.trime.data.sound.SoundThemeManager
-import com.osfans.trime.data.theme.Config
+import com.osfans.trime.data.theme.Theme
 import com.osfans.trime.data.theme.ThemeManager
 import com.osfans.trime.ime.core.Trime
 import com.osfans.trime.ui.components.CoroutineChoiceDialog
@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 suspend fun Context.themePicker(
-    @StyleRes themeResId: Int = 0
+    @StyleRes themeResId: Int = 0,
 ): AlertDialog {
     return CoroutineChoiceDialog(this, themeResId).apply {
         title = getString(R.string.looks__selected_theme_title)
@@ -39,7 +39,7 @@ suspend fun Context.themePicker(
         onOKButton {
             with(items[checkedItem].toString()) {
                 ThemeManager.switchTheme(if (this == "trime") this else "$this.trime")
-                Config.get().init()
+                Theme.get().init()
             }
             launch {
                 Trime.getServiceOrNull()?.initKeyboard()
@@ -49,14 +49,14 @@ suspend fun Context.themePicker(
 }
 
 suspend fun Context.colorPicker(
-    @StyleRes themeResId: Int = 0
+    @StyleRes themeResId: Int = 0,
 ): AlertDialog {
     val prefs by lazy { AppPrefs.defaultInstance() }
     return CoroutineChoiceDialog(this, themeResId).apply {
         title = getString(R.string.looks__selected_color_title)
         initDispatcher = Dispatchers.Default
         onInit {
-            val all = Config.get().presetColorSchemes
+            val all = Theme.get().getPresetColorSchemes()
             items = all.map { it.second }.toTypedArray()
             val current = prefs.themeAndColor.selectedColor
             val schemeIds = all.map { it.first }
@@ -64,7 +64,7 @@ suspend fun Context.colorPicker(
         }
         postiveDispatcher = Dispatchers.Default
         onOKButton {
-            val all = Config.get().presetColorSchemes
+            val all = Theme.get().getPresetColorSchemes()
             val schemeIds = all.map { it.first }
             prefs.themeAndColor.selectedColor = schemeIds[checkedItem]
             launch {
@@ -75,7 +75,7 @@ suspend fun Context.colorPicker(
 }
 
 fun Context.schemaPicker(
-    @StyleRes themeResId: Int = 0
+    @StyleRes themeResId: Int = 0,
 ): AlertDialog {
     val available = Rime.getAvailableRimeSchemaList()
     val selected = Rime.getSelectedRimeSchemaList()
@@ -86,14 +86,14 @@ fun Context.schemaPicker(
         .setTitle(R.string.pref_select_schemas)
         .setMultiChoiceItems(
             available.mapNotNull(SchemaListItem::name).toTypedArray(),
-            checked
+            checked,
         ) { _, id, isChecked -> checked[id] = isChecked }
         .setPositiveButton(android.R.string.ok) { _, _ ->
             (this as LifecycleOwner).lifecycleScope.launch {
                 Rime.selectRimeSchemas(
                     availableIds
                         .filterIndexed { i, _ -> checked[i] }
-                        .toTypedArray()
+                        .toTypedArray(),
                 )
                 val loading = ProgressBarDialogIndeterminate(titleId = R.string.deploy_progress).create()
                 val job = launch {
@@ -101,7 +101,7 @@ fun Context.schemaPicker(
                     loading.show()
                 }
                 withContext(Dispatchers.Default) {
-                    Rime.deployRime()
+                    Rime.deploy()
                     job.cancelAndJoin()
                     if (loading.isShowing) {
                         loading.dismiss()
@@ -114,7 +114,7 @@ fun Context.schemaPicker(
 }
 
 fun Context.soundPicker(
-    @StyleRes themeResId: Int = 0
+    @StyleRes themeResId: Int = 0,
 ): AlertDialog {
     val all = SoundThemeManager.getAllSoundThemes().mapNotNull(SoundTheme::name)
     val current = SoundThemeManager.getActiveSoundTheme().getOrNull()?.name ?: ""
@@ -123,7 +123,7 @@ fun Context.soundPicker(
         .setTitle(R.string.keyboard__key_sound_package_title)
         .setSingleChoiceItems(
             all.toTypedArray(),
-            checked
+            checked,
         ) { _, id -> checked = id }
         .setPositiveButton(android.R.string.ok) { _, _ ->
             SoundThemeManager.switchSound(all[checked])

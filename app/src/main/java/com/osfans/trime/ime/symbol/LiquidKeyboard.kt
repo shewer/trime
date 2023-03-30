@@ -17,7 +17,7 @@ import com.osfans.trime.data.db.ClipboardHelper
 import com.osfans.trime.data.db.CollectionHelper
 import com.osfans.trime.data.db.DatabaseBean
 import com.osfans.trime.data.db.DraftHelper
-import com.osfans.trime.data.theme.Config
+import com.osfans.trime.data.theme.Theme
 import com.osfans.trime.ime.core.Trime
 import com.osfans.trime.ime.enums.KeyCommandType
 import com.osfans.trime.ime.enums.SymbolKeyboardType
@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 
 class LiquidKeyboard(private val context: Context) {
-    private val theme: Config = Config.get()
+    private val theme: Theme = Theme.get()
     private val tabManager: TabManager = TabManager.get()
     private val service: Trime = Trime.getService()
     private lateinit var keyboardView: RecyclerView
@@ -61,7 +61,8 @@ class LiquidKeyboard(private val context: Context) {
         when (tag.type) {
             SymbolKeyboardType.CLIPBOARD,
             SymbolKeyboardType.COLLECTION,
-            SymbolKeyboardType.DRAFT -> {
+            SymbolKeyboardType.DRAFT,
+            -> {
                 tabManager.select(i)
                 initDbData(tag.type)
             }
@@ -246,7 +247,9 @@ class LiquidKeyboard(private val context: Context) {
                 if (Rime.isComposing()) {
                     updateCandidates(Rime.getCandidatesWithoutSwitch().asList())
                     keyboardView.scrollToPosition(0)
-                } else service.selectLiquidKeyboard(-1)
+                } else {
+                    service.selectLiquidKeyboard(-1)
+                }
             }
         }
         // 设置布局管理器
@@ -273,7 +276,7 @@ class LiquidKeyboard(private val context: Context) {
             keyboardView.isSelected = true
         }
         candidateAdapter.updateCandidates(
-            data.map { b -> CandidateListItem("", b.text) }
+            data.map { b -> CandidateListItem("", b.text) },
         )
     }
 }

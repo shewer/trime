@@ -36,8 +36,8 @@ import androidx.annotation.Nullable;
 import com.osfans.trime.core.CandidateListItem;
 import com.osfans.trime.core.Rime;
 import com.osfans.trime.data.AppPrefs;
-import com.osfans.trime.data.theme.Config;
 import com.osfans.trime.data.theme.FontManager;
+import com.osfans.trime.data.theme.Theme;
 import com.osfans.trime.ime.core.Trime;
 import com.osfans.trime.util.DimensionsKt;
 import com.osfans.trime.util.GraphicUtils;
@@ -88,27 +88,26 @@ public class Candidate extends View {
   }
 
   public void reset() {
-    Config config = Config.get();
-    candidateHighlight = new PaintDrawable(config.colors.getColor("hilited_candidate_back_color"));
-    candidateHighlight.setCornerRadius(config.style.getFloat("layout/round_corner"));
-    separatorPaint.setColor(config.colors.getColor("candidate_separator_color"));
-    candidateSpacing = (int) DimensionsKt.dp2px(config.style.getFloat("candidate_spacing"));
-    candidatePadding = (int) DimensionsKt.dp2px(config.style.getFloat("candidate_padding"));
+    Theme theme = Theme.get();
+    candidateHighlight = new PaintDrawable(theme.colors.getColor("hilited_candidate_back_color"));
+    candidateHighlight.setCornerRadius(theme.style.getFloat("layout/round_corner"));
+    separatorPaint.setColor(theme.colors.getColor("candidate_separator_color"));
+    candidateSpacing = (int) DimensionsKt.dp2px(theme.style.getFloat("candidate_spacing"));
+    candidatePadding = (int) DimensionsKt.dp2px(theme.style.getFloat("candidate_padding"));
 
-    candidateTextColor = config.colors.getColor("candidate_text_color");
-    commentTextColor = config.colors.getColor("comment_text_color");
-    hilitedCandidateTextColor = config.colors.getColor("hilited_candidate_text_color");
-    hilitedCommentTextColor = config.colors.getColor("hilited_comment_text_color");
+    candidateTextColor = theme.colors.getColor("candidate_text_color");
+    commentTextColor = theme.colors.getColor("comment_text_color");
+    hilitedCandidateTextColor = theme.colors.getColor("hilited_candidate_text_color");
+    hilitedCommentTextColor = theme.colors.getColor("hilited_comment_text_color");
 
-    int candidate_text_size =
-        (int) DimensionsKt.sp2px(config.style.getFloat("candidate_text_size"));
-    int comment_text_size = (int) DimensionsKt.sp2px(config.style.getFloat("comment_text_size"));
-    candidateViewHeight = (int) DimensionsKt.dp2px(config.style.getFloat("candidate_view_height"));
-    commentHeight = (int) DimensionsKt.dp2px(config.style.getFloat("comment_height"));
+    int candidate_text_size = (int) DimensionsKt.sp2px(theme.style.getFloat("candidate_text_size"));
+    int comment_text_size = (int) DimensionsKt.sp2px(theme.style.getFloat("comment_text_size"));
+    candidateViewHeight = (int) DimensionsKt.dp2px(theme.style.getFloat("candidate_view_height"));
+    commentHeight = (int) DimensionsKt.dp2px(theme.style.getFloat("comment_height"));
 
-    candidateFont = FontManager.getTypeface(config.style.getString("candidate_font"));
-    commentFont = FontManager.getTypeface(config.style.getString("comment_font"));
-    symbolFont = FontManager.getTypeface(config.style.getString("symbol_font"));
+    candidateFont = FontManager.getTypeface(theme.style.getString("candidate_font"));
+    commentFont = FontManager.getTypeface(theme.style.getString("comment_font"));
+    symbolFont = FontManager.getTypeface(theme.style.getString("symbol_font"));
 
     candidatePaint.setTextSize(candidate_text_size);
     candidatePaint.setTypeface(candidateFont);
@@ -117,8 +116,8 @@ public class Candidate extends View {
     commentPaint.setTextSize(comment_text_size);
     commentPaint.setTypeface(commentFont);
 
-    isCommentOnTop = config.style.getBoolean("comment_on_top");
-    candidateUseCursor = config.style.getBoolean("candidate_use_cursor");
+    isCommentOnTop = theme.style.getBoolean("comment_on_top");
+    candidateUseCursor = theme.style.getBoolean("candidate_use_cursor");
     invalidate();
   }
 
@@ -229,6 +228,7 @@ public class Candidate extends View {
     if (candidates == null) return;
     super.onDraw(canvas);
 
+    boolean moveAllCandidatesDown = false;
     for (ComputedCandidate computedCandidate : computedCandidates) {
       int i = computedCandidates.indexOf(computedCandidate);
       // Draw highlight
@@ -244,11 +244,12 @@ public class Candidate extends View {
                 - (candidatePaint.ascent() + candidatePaint.descent()) / 2;
         if (shouldShowComment) {
           String comment = ((ComputedCandidate.Word) computedCandidate).getComment();
+          moveAllCandidatesDown |= comment != null && !comment.isEmpty();
+          if (moveAllCandidatesDown) wordY += commentHeight / 2.0f;
           if (comment != null && !comment.isEmpty()) {
             float commentX = computedCandidate.getGeometry().centerX();
             float commentY =
                 commentHeight / 2.0f - (commentPaint.ascent() + commentPaint.descent()) / 2;
-            wordY += commentHeight / 2.0f;
             if (!isCommentOnTop) {
               float commentWidth = GraphicUtils.measureText(commentPaint, comment, commentFont);
               commentX = computedCandidate.getGeometry().right - commentWidth / 2;

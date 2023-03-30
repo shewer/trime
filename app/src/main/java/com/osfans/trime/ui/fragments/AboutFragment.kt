@@ -15,8 +15,9 @@ import com.osfans.trime.core.Rime
 import com.osfans.trime.data.opencc.OpenCCDictManager
 import com.osfans.trime.ui.components.PaddingPreferenceFragment
 import com.osfans.trime.ui.main.MainViewModel
-import com.osfans.trime.util.AppVersionUtils.writeLibraryVersionToSummary
 import com.osfans.trime.util.Const
+import com.osfans.trime.util.optionalPreference
+import com.osfans.trime.util.thirdPartySummary
 import splitties.systemservices.clipboardManager
 
 class AboutFragment : PaddingPreferenceFragment() {
@@ -30,7 +31,7 @@ class AboutFragment : PaddingPreferenceFragment() {
                 isCopyingEnabled = true
                 intent = Intent(
                     Intent.ACTION_VIEW,
-                    Uri.parse("${Const.currentGitRepo}/commits/${Const.buildGitHash}")
+                    Uri.parse("${Const.currentGitRepo}/commits/${Const.buildGitHash}"),
                 )
             }
             get<Preference>("about__buildinfo")?.apply {
@@ -43,11 +44,10 @@ class AboutFragment : PaddingPreferenceFragment() {
                 }
             }
             get<Preference>("about__librime_version")
-                ?.writeLibraryVersionToSummary(Rime.getLibrimeVersion())
+                ?.thirdPartySummary(Rime.getLibrimeVersion())
             get<Preference>("about__opencc_version")
-                ?.writeLibraryVersionToSummary(OpenCCDictManager.getOpenCCVersion())
-            get<Preference>("pref_trime_custom_qq")
-                ?.hidden()
+                ?.thirdPartySummary(OpenCCDictManager.getOpenCCVersion())
+            get<Preference>("pref_trime_custom_qq")?.optionalPreference()
             get<Preference>("about__open_source_licenses")?.apply {
                 setOnPreferenceClickListener {
                     findNavController().navigate(R.id.action_aboutFragment_to_licenseFragment)
@@ -60,11 +60,5 @@ class AboutFragment : PaddingPreferenceFragment() {
     override fun onResume() {
         super.onResume()
         viewModel.setToolbarTitle(getString(R.string.pref_about))
-    }
-
-    private fun Preference.hidden() {
-        if (this.summary?.isBlank() == true || this.intent?.data == null) {
-            this.isVisible = false
-        }
     }
 }

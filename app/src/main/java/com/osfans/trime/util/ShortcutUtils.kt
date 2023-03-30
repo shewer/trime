@@ -124,7 +124,7 @@ object ShortcutUtils {
     fun syncInBackground() {
         val prefs = AppPrefs.defaultInstance()
         prefs.profile.lastBackgroundSync = Date().time.toString()
-        prefs.profile.lastSyncStatus = Rime.syncRimeUserData().also { Rime.deployRime() }
+        prefs.profile.lastSyncStatus = Rime.syncRimeUserData().also { Rime.deploy() }
     }
 
     fun openCategory(keyCode: Int): Boolean {
@@ -135,7 +135,9 @@ object ShortcutUtils {
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_HISTORY
             ActivityUtils.startActivity(intent)
             true
-        } else false
+        } else {
+            false
+        }
     }
 
     private val applicationLaunchKeyCategories = SparseArray<String>().apply {
@@ -153,15 +155,15 @@ object ShortcutUtils {
                 addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK
                         or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-                        or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        or Intent.FLAG_ACTIVITY_CLEAR_TOP,
                 )
-            }
+            },
         )
     }
 
     fun launchLogActivity(context: Context) {
         context.startActivity(
-            Intent(context, LogActivity::class.java)
+            Intent(context, LogActivity::class.java),
         )
     }
 }

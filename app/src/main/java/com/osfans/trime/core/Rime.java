@@ -196,8 +196,12 @@ public class Rime {
   }
 
   public Rime(boolean full_check) {
-    init(full_check);
-    self = this;
+    startup(full_check);
+  }
+
+  public static void destroy() {
+    exitRime();
+    self = null;
   }
 
   public static void initSchema() {
@@ -213,7 +217,7 @@ public class Rime {
     return getRimeStatus(mStatus);
   }
 
-  private static void init(boolean full_check) {
+  private static void startup(boolean full_check) {
     isHandlingRimeNotification = false;
 
     DataManager.sync();
@@ -223,10 +227,14 @@ public class Rime {
     Timber.i("Starting up Rime APIs ...");
     startupRime(sharedDataDir, userDataDir, full_check);
 
-    Timber.i("Initializing schema stuffs ...");
+    Timber.i("Updating schema switchers ...");
     initSchema();
+  }
 
-    Timber.i("Finishing startup");
+  public static void deploy() {
+    destroy();
+    Rime.get(true);
+    OpenCCDictManager.buildOpenCCDict();
   }
 
   public static String getCommitText() {
@@ -355,9 +363,6 @@ public class Rime {
 
   public static Rime get(boolean full_check) {
     if (self == null) {
-      if (full_check) {
-        OpenCCDictManager.buildOpenCCDict();
-      }
       self = new Rime(full_check);
     }
     return self;
@@ -385,7 +390,7 @@ public class Rime {
   public static native void startupRime(
       @NonNull String sharedDir, @NonNull String userDir, boolean fullCheck);
 
-  public static native void deployRime();
+  public static native void exitRime();
 
   public static native boolean deployRimeSchemaFile(@NonNull String schemaFile);
 
@@ -466,4 +471,7 @@ public class Rime {
   public static native SchemaListItem[] getSelectedRimeSchemaList();
 
   public static native boolean selectRimeSchemas(@NonNull String[] schemaIds);
+
+  @Nullable
+  public static native String getRimeStateLabel(@NonNull String optionName, boolean state);
 }

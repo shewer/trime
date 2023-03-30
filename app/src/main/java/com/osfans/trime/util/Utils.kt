@@ -3,16 +3,20 @@ package com.osfans.trime.util
 import android.app.Activity
 import android.content.Context
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.preference.Preference
 import androidx.recyclerview.widget.RecyclerView
 import com.blankj.utilcode.util.ToastUtils
 import com.osfans.trime.R
 import com.osfans.trime.TrimeApplication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.Serializable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -82,4 +86,29 @@ fun RecyclerView.applyNavBarInsetsBottomPadding() {
         }
         windowInsets
     }
+}
+
+inline fun <reified T : Serializable> Bundle.serializable(key: String): T? {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        getSerializable(key, T::class.java)
+    } else {
+        @Suppress("DEPRECATION")
+        getSerializable(key) as? T
+    }
+}
+
+fun Preference.thirdPartySummary(versionCode: String) {
+    summary = versionCode
+    intent?.let {
+        val commitHash = if (versionCode.contains("-g")) {
+            versionCode.replace("^(.*-g)([0-9a-f]+)(.*)$".toRegex(), "$2")
+        } else {
+            versionCode.replace("^([^-]*)(-.*)$".toRegex(), "$1")
+        }
+        it.data = Uri.withAppendedPath(it.data, "commits/$commitHash")
+    }
+}
+
+fun Preference.optionalPreference() {
+    isVisible = summary.isNullOrBlank() || intent?.data == null
 }

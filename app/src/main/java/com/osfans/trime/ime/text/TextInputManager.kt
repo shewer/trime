@@ -13,7 +13,7 @@ import com.osfans.trime.core.RimeEvent
 import com.osfans.trime.core.SchemaListItem
 import com.osfans.trime.data.AppPrefs
 import com.osfans.trime.data.schema.SchemaManager
-import com.osfans.trime.data.theme.Config
+import com.osfans.trime.data.theme.Theme
 import com.osfans.trime.databinding.InputRootBinding
 import com.osfans.trime.ime.broadcast.IntentReceiver
 import com.osfans.trime.ime.core.EditorInstance
@@ -77,8 +77,10 @@ class TextInputManager private constructor() :
     companion object {
         /** Delimiter regex for key property group, their format like `{property_1: value_1, property_2: value_2}` */
         private val DELIMITER_PROPERTY_GROUP = """^(\{[^{}]+\}).*$""".toRegex()
+
         /** Delimiter regex for property key tag, its format like `Escape: ` following a property group like above */
         private val DELIMITER_PROPERTY_KEY = """^((\{Escape\})?[^{}]+).*$""".toRegex()
+
         /** Delimiter regex to split language/locale tags. */
         private val DELIMITER_SPLITTER = """[-_]""".toRegex()
         private var instance: TextInputManager? = null
@@ -109,15 +111,15 @@ class TextInputManager private constructor() :
             .onEach(::handleRimeNotification)
             .launchIn(trime.lifecycleScope)
 
-        val imeConfig = Config.get()
-        val defaultLocale = imeConfig.style.getString("locale").split(DELIMITER_SPLITTER)
+        val theme = Theme.get()
+        val defaultLocale = theme.style.getString("locale").split(DELIMITER_SPLITTER)
         locales[0] = when (defaultLocale.size) {
             3 -> Locale(defaultLocale[0], defaultLocale[1], defaultLocale[2])
             2 -> Locale(defaultLocale[0], defaultLocale[1])
             else -> Locale.getDefault()
         }
 
-        val latinLocale = imeConfig.style.getString("latin_locale").split(DELIMITER_SPLITTER)
+        val latinLocale = theme.style.getString("latin_locale").split(DELIMITER_SPLITTER)
         locales[1] = when (latinLocale.size) {
             3 -> Locale(latinLocale[0], latinLocale[1], latinLocale[2])
             2 -> Locale(latinLocale[0], latinLocale[1])
@@ -141,7 +143,7 @@ class TextInputManager private constructor() :
             it.setPageStr(
                 Runnable { trime.handleKey(KeyEvent.KEYCODE_PAGE_DOWN, 0) },
                 Runnable { trime.handleKey(KeyEvent.KEYCODE_PAGE_UP, 0) },
-                Runnable { trime.selectLiquidKeyboard(SymbolKeyboardType.CANDIDATE) }
+                Runnable { trime.selectLiquidKeyboard(SymbolKeyboardType.CANDIDATE) },
             )
             it.visibility = if (Rime.getOption("_hide_candidate")) View.GONE else View.VISIBLE
         }
@@ -190,7 +192,8 @@ class TextInputManager private constructor() :
                     when (inputAttrsRaw and InputType.TYPE_MASK_CLASS) {
                         InputType.TYPE_CLASS_NUMBER,
                         InputType.TYPE_CLASS_PHONE,
-                        InputType.TYPE_CLASS_DATETIME -> {
+                        InputType.TYPE_CLASS_DATETIME,
+                        -> {
                             "number"
                         }
                         InputType.TYPE_CLASS_TEXT -> {
@@ -202,11 +205,12 @@ class TextInputManager private constructor() :
                                 InputType.TYPE_TEXT_VARIATION_PASSWORD,
                                 InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
                                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
-                                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD -> {
+                                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+                                -> {
                                     Timber.i(
                                         "EditorInfo: " +
                                             " inputAttrsRaw" + inputAttrsRaw +
-                                            "; InputType" + (inputAttrsRaw and InputType.TYPE_MASK_VARIATION)
+                                            "; InputType" + (inputAttrsRaw and InputType.TYPE_MASK_VARIATION),
                                     )
 
                                     tempAsciiMode = true
@@ -298,12 +302,12 @@ class TextInputManager private constructor() :
     override fun onRelease(keyEventCode: Int) {
         Timber.d(
             "\t<TrimeInput>\tonRelease() needSendUpRimeKey=" + needSendUpRimeKey + ", keyEventcode=" + keyEventCode +
-                ", Event.getRimeEvent=" + Event.getRimeEvent(keyEventCode, Rime.META_RELEASE_ON)
+                ", Event.getRimeEvent=" + Event.getRimeEvent(keyEventCode, Rime.META_RELEASE_ON),
         )
         if (needSendUpRimeKey) {
             if (shouldUpdateRimeOption) {
                 Rime.setOption("soft_cursors", prefs.keyboard.softCursorEnabled)
-                Rime.setOption("_horizontal", trime.imeConfig.style.getBoolean("horizontal"))
+                Rime.setOption("_horizontal", Theme.get().style.getBoolean("horizontal"))
                 shouldUpdateRimeOption = false
             }
             // todo 释放按键可能不对
@@ -364,15 +368,16 @@ class TextInputManager private constructor() :
                 if (arg.matches(activeTextRegex)) {
                     var activeTextMode =
                         arg.replaceFirst(activeTextRegex, "$1").toDouble().toInt()
-                    if (activeTextMode <1)
+                    if (activeTextMode < 1) {
                         activeTextMode = 1
+                    }
                     val activeText = activeEditorInstance.getActiveText(activeTextMode)
                     arg = String.format(
                         arg,
                         activeEditorInstance.lastCommittedText,
                         Rime.getRimeRawInput() ?: "",
                         activeText,
-                        activeText
+                        activeText,
                     )
                 }
 
@@ -394,16 +399,16 @@ class TextInputManager private constructor() :
                 trime.lifecycleScope.launch {
                     when (event.option) {
                         "theme" -> trime.showDialogAboveInputView(
-                            trime.themePicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
+                            trime.themePicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert),
                         )
                         "color" -> trime.showDialogAboveInputView(
-                            trime.colorPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
+                            trime.colorPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert),
                         )
                         "schema" -> trime.showDialogAboveInputView(
-                            trime.schemaPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
+                            trime.schemaPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert),
                         )
                         "sound" -> trime.showDialogAboveInputView(
-                            trime.soundPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
+                            trime.soundPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert),
                         )
                         else -> ShortcutUtils.launchMainActivity(trime)
                     }
@@ -411,7 +416,7 @@ class TextInputManager private constructor() :
             }
             KeyEvent.KEYCODE_PROG_RED -> trime.lifecycleScope.launch {
                 trime.showDialogAboveInputView(
-                    trime.colorPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert)
+                    trime.colorPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert),
                 )
             }
             KeyEvent.KEYCODE_MENU -> showOptionsDialog()
@@ -433,10 +438,11 @@ class TextInputManager private constructor() :
                         }
                     }
                 }
-                if (event.mask == 0)
+                if (event.mask == 0) {
                     onKey(event.code, KeyboardSwitcher.currentKeyboard.modifer)
-                else
+                } else {
                     onKey(event.code, event.mask)
+                }
             }
         }
     }
@@ -517,8 +523,9 @@ class TextInputManager private constructor() :
                     // todo 找到切换高亮候选词的API，并把此处改为模拟移动候选后发送空格
                     // 如果使用了lua处理候选上屏，模拟数字键、空格键是非常有必要的
                     activeEditorInstance.commitRimeText()
-                } else
+                } else {
                     activeEditorInstance.commitRimeText()
+                }
             }
         } else if (index == 9) {
             trime.handleKey(KeyEvent.KEYCODE_0, 0)
@@ -562,14 +569,14 @@ class TextInputManager private constructor() :
             val currentSchema = Rime.getCurrentRimeSchema()
             builder
                 .setNegativeButton(
-                    R.string.pref_select_schemas
+                    R.string.pref_select_schemas,
                 ) { dialog, _ ->
                     dialog.dismiss()
                     trime.showDialogAboveInputView(trime.schemaPicker(R.style.Theme_AppCompat_DayNight_Dialog_Alert))
                 }
                 .setSingleChoiceItems(
                     schemaNameList,
-                    schemaIdList.indexOf(currentSchema)
+                    schemaIdList.indexOf(currentSchema),
                 ) { dialog: DialogInterface, id: Int ->
                     dialog.dismiss()
                     trime.lifecycleScope.launch {

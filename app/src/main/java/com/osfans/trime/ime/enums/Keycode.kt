@@ -6,6 +6,7 @@ import timber.log.Timber
 import java.util.EnumMap
 import kotlin.collections.HashMap
 
+@Suppress("ktlint:enum-entry-name-case")
 enum class Keycode {
     // 与原trime.yaml主题android_key/name小节相比，差异如下：
     // 1. 数字开头的keyName添加了下划线(在init阶段已经修复)，受到影响的按键有： 0-12，3D_MODE
@@ -154,9 +155,9 @@ enum class Keycode {
                 event[0] = keycode
                 event[1] = mask
             } else {
-                if (keycode <= Z.ordinal)
+                if (keycode <= Z.ordinal) {
                     event[0] = keycode - A.ordinal + a.ordinal
-                else {
+                } else {
                     event[0] = when (keycode) {
                         exclam.ordinal -> _1.ordinal
                         dollar.ordinal -> _4.ordinal
@@ -207,7 +208,9 @@ enum class Keycode {
                 }
             } else if (hasSymbolLabel(keyCode)) { // 可見符號
                 getSymbolLabel(valueOf(keyCode))
-            } else ""
+            } else {
+                ""
+            }
 
         private val masks = hashMapOf(
             "Shift" to KeyEvent.META_SHIFT_ON,

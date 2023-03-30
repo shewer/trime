@@ -24,10 +24,10 @@ import android.text.TextUtils;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import com.osfans.trime.core.Rime;
-import com.osfans.trime.data.theme.Config;
+import com.osfans.trime.data.theme.Theme;
 import com.osfans.trime.ime.enums.KeyEventType;
 import com.osfans.trime.util.CollectionUtils;
-import com.osfans.trime.util.ConfigGetter;
+import com.osfans.trime.util.DimensionsKt;
 import java.text.MessageFormat;
 import java.util.Arrays;
 import java.util.Locale;
@@ -115,7 +115,7 @@ public class Key {
   public Key(Keyboard parent, Map<String, Object> mk) {
     this(parent);
     String s;
-    Config config = Config.get();
+    Theme theme = Theme.get();
     {
       boolean hasComposingKey = false;
 
@@ -124,33 +124,34 @@ public class Key {
         s = CollectionUtils.obtainString(mk, typeStr, "");
         if (!TextUtils.isEmpty(s)) {
           events[type.ordinal()] = new Event(mKeyboard, s);
-          hasComposingKey = type.ordinal() < KeyEventType.COMBO.ordinal();
+          if (type.ordinal() < KeyEventType.COMBO.ordinal()) hasComposingKey = true;
         } else if (type == KeyEventType.CLICK) {
           events[type.ordinal()] = new Event(mKeyboard, "");
         }
       }
       if (hasComposingKey) mKeyboard.getComposingKeys().add(this);
 
-      label = ConfigGetter.getString(mk, "label", "");
-      labelSymbol = ConfigGetter.getString(mk, "label_symbol", "");
-      hint = ConfigGetter.getString(mk, "hint", "");
+      label = CollectionUtils.obtainString(mk, "label", "");
+      labelSymbol = CollectionUtils.obtainString(mk, "label_symbol", "");
+      hint = CollectionUtils.obtainString(mk, "hint", "");
       if (mk.containsKey("send_bindings")) {
-        send_bindings = ConfigGetter.getBoolean(mk, "send_bindings", true);
+        send_bindings = CollectionUtils.obtainBoolean(mk, "send_bindings", true);
       } else if (!hasComposingKey) {
         send_bindings = false;
       }
     }
 
     mKeyboard.setModiferKey(getCode(), this);
-    key_text_size = ConfigGetter.getPixel(mk, "key_text_size", 0);
-    symbol_text_size = ConfigGetter.getPixel(mk, "symbol_text_size", 0);
-    key_text_color = config.colors.getColor(mk, "key_text_color");
-    hilited_key_text_color = config.colors.getColor(mk, "hilited_key_text_color");
-    key_back_color = config.colors.getDrawable(mk, "key_back_color");
-    hilited_key_back_color = config.colors.getDrawable(mk, "hilited_key_back_color");
-    key_symbol_color = config.colors.getColor(mk, "key_symbol_color");
-    hilited_key_symbol_color = config.colors.getColor(mk, "hilited_key_symbol_color");
-    round_corner = ConfigGetter.getFloat(mk, "round_corner", 0);
+    key_text_size = (int) DimensionsKt.sp2px(CollectionUtils.obtainFloat(mk, "key_text_size", 0));
+    symbol_text_size =
+        (int) DimensionsKt.sp2px(CollectionUtils.obtainFloat(mk, "symbol_text_size", 0));
+    key_text_color = theme.colors.getColor(mk, "key_text_color");
+    hilited_key_text_color = theme.colors.getColor(mk, "hilited_key_text_color");
+    key_back_color = theme.colors.getDrawable(mk, "key_back_color");
+    hilited_key_back_color = theme.colors.getDrawable(mk, "hilited_key_back_color");
+    key_symbol_color = theme.colors.getColor(mk, "key_symbol_color");
+    hilited_key_symbol_color = theme.colors.getColor(mk, "hilited_key_symbol_color");
+    round_corner = CollectionUtils.obtainFloat(mk, "round_corner", 0);
   }
 
   public static Map<String, Map<String, Object>> getPresetKeys() {

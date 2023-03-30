@@ -2,7 +2,7 @@ package com.osfans.trime.ime.symbol;
 
 import androidx.annotation.NonNull;
 import com.osfans.trime.data.schema.SchemaManager;
-import com.osfans.trime.data.theme.Config;
+import com.osfans.trime.data.theme.Theme;
 import com.osfans.trime.ime.enums.KeyCommandType;
 import com.osfans.trime.ime.enums.SymbolKeyboardType;
 import com.osfans.trime.util.CollectionUtils;
@@ -63,7 +63,7 @@ public class TabManager {
   }
 
   private TabManager() {
-    final Config theme = Config.get();
+    final Theme theme = Theme.get();
     final List<String> availables = (List<String>) theme.liquid.getObject("keyboards");
     if (availables != null) {
       for (final String id : availables) {
@@ -140,7 +140,7 @@ public class TabManager {
                 else keys.add(new SimpleKeyBean((String) p.get("click")));
               } else {
                 final Map<String, List<String>> symbolMaps =
-                    SchemaManager.getActiveSchema().getPunctuator().getSymbols();
+                    SchemaManager.getActiveSchema().getSymbols();
                 for (Map.Entry<String, String> entry : p.entrySet()) {
                   if (symbolMaps != null && symbolMaps.containsKey(entry.getValue()))
                     keys.add(new SimpleKeyBean(entry.getValue(), entry.getKey()));
