@@ -30,4 +30,4 @@
 	url = https://github.com/rime/librime-charcode
 [submodule "librime-predict"]
         path = app/src/main/jni/librime-predict
-	url = https://github.com/lotem/librime-predict
+	url = https://github.com/shewer/librime-predict
