@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+// 使用TabManager时，不应该使用变量保存TabManager实例，应该使用TabManager.get()方法获取
 public class TabManager {
   private int selected = 0;
   private final List<SimpleKeyBean> keyboardData = new ArrayList<>();
@@ -21,6 +22,10 @@ public class TabManager {
   private final List<SimpleKeyBean> notKeyboard = new ArrayList<>();
   private final TabTag tagExit = new TabTag("返回", SymbolKeyboardType.NO_KEY, KeyCommandType.EXIT);
 
+  public static void updateSelf() {
+    self = new TabManager();
+  }
+
   public static TabManager get() {
     if (null == self) self = new TabManager();
     return self;
@@ -31,9 +36,41 @@ public class TabManager {
 
     for (TabTag tag : tabTags) {
       if (SymbolKeyboardType.hasKey(tag.type)) tabSwitchData.add(new SimpleKeyBean(tag.text));
-      else tabSwitchData.add(new SimpleKeyBean(""));
     }
     return tabSwitchData;
+  }
+
+  /**
+   * 得到TABS中对应的TabTag 去除不显示的tagTab(没有keys列表的tagTab)之后按顺序排列tagTab,再从中获取TabTag
+   *
+   * @param position 位置（索引）
+   * @return TabTag
+   */
+  public TabTag getTabSwitchTabTag(int position) {
+    int i = 0;
+    for (TabTag tag : tabTags) {
+      if (SymbolKeyboardType.hasKey(tag.type)) {
+        if (i++ == position) return tag;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 得到TABS中对应的真实索引 真实的索引是去除 没有keys列表的tagTab 之后按顺序排列的tagTab索引
+   *
+   * @param position 位置（索引）
+   * @return int TABS中显示的真实索引
+   */
+  public int getTabSwitchPosition(int position) {
+    int i = 0;
+    for (TabTag tag : tabTags) {
+      if (SymbolKeyboardType.hasKey(tag.type)) {
+        if (position-- <= 0) break;
+      }
+      i++;
+    }
+    return i;
   }
 
   public static TabTag getTag(int i) {
@@ -160,8 +197,8 @@ public class TabManager {
   }
 
   public List<SimpleKeyBean> select(int tabIndex) {
-    if (tabIndex >= tabTags.size()) return keyboardData;
     selected = tabIndex;
+    if (tabIndex >= tabTags.size()) return keyboardData;
     TabTag tag = tabTags.get(tabIndex);
     if (tag.type == SymbolKeyboardType.TABS) tabSwitchPosition = selected;
     return keyboards.get(tabIndex);
@@ -169,6 +206,14 @@ public class TabManager {
 
   public int getSelected() {
     return selected;
+  }
+
+  public int getSelectedOrZero() {
+    return (selected == -1) ? 0 : selected;
+  }
+
+  public void setTabExited() {
+    this.selected = -1;
   }
 
   public boolean isAfterTabSwitch(int position) {
